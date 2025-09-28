@@ -56,3 +56,24 @@ CREATE INDEX idx_employee_name ON employees(fname, lname);
 CREATE INDEX idx_employee_email ON employees(email);
 CREATE INDEX idx_employee_mobile ON employees(mobile);
 CREATE INDEX idx_employee_role ON employees(role);
+
+-- =========================
+-- Table: attendance
+-- =========================
+-- attendance table 
+CREATE TABLE attendance (
+    id SERIAL PRIMARY KEY,
+    employee_id INT NOT NULL REFERENCES employees(id) ON DELETE CASCADE,
+    work_date DATE NOT NULL,
+    status VARCHAR(20) NOT NULL DEFAULT 'present' CHECK (status IN ('Present', 'Absent', 'Leave')),
+    check_in TIMESTAMP NULL,
+    check_out TIMESTAMP NULL,
+    overtime_hours INT DEFAULT 0,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE(employee_id, work_date)
+);
+
+CREATE INDEX idx_attendance_employee_date ON attendance(employee_id, work_date);
+CREATE INDEX idx_attendance_work_date ON attendance(work_date);
+CREATE INDEX idx_attendance_status ON attendance(status)

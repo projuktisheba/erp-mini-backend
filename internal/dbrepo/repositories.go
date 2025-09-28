@@ -7,6 +7,7 @@ import (
 // DBRepository contains all individual repositories
 type DBRepository struct {
 	EmployeeRepo *EmployeeRepo
+	AttendanceRepo *AttendanceRepo
 	// SubscriptionRepo     *SubscriptionRepo
 }
 

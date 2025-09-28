@@ -72,6 +72,31 @@ func (app *application) routes() http.Handler {
 		r.Put("/employee/role", app.Handlers.Employee.UpdateEmployeeRole)
 
 	})
+	mux.Route("/api/v1/hr/attendance", func(r chi.Router) {
+		// Mark or update today's attendance for a single employee
+		// Example: POST /api/v1/hr/attendance/5
+		// Body (JSON): { checkin: "09:00", checkout: "18:00", overtime_hours: 2 }
+		r.Post("/{employeeID}", app.Handlers.Attendance.UpdateTodayAttendance)
+
+		// Batch update today's attendance for multiple employees
+		// Example: POST /api/v1/hr/attendance/batch
+		// Body (JSON): { attendances: [ {id: 5, checkin: "09:00", checkout: "18:00"}, ... ] }
+		r.Post("/batch", app.Handlers.Attendance.BatchUpdateTodayAttendance)
+
+		// Get calendar-style attendance for one employee (monthly or date range)
+		// Example: GET /api/v1/hr/attendance/5/calendar?month=2025-09
+		// Example: GET /api/v1/hr/attendance/5/calendar?start=2025-09-01&end=2025-09-15
+		r.Get("/{employeeID}/calendar", app.Handlers.Attendance.GetEmployeeCalendar)
+
+		// Get monthly attendance summary (working days, overtime, etc.) for one employee
+		// Example: GET /api/v1/hr/attendance/5/summary?month=2025-09
+		r.Get("/{employeeID}/summary", app.Handlers.Attendance.GetEmployeeSummary)
+
+		// Get batch attendance summary for multiple employees in a given month or range
+		// Example: GET /api/v1/hr/attendance/batch/summary?month=2025-09
+		// Example: GET /api/v1/hr/attendance/batch/summary?start=2025-09-01&end=2025-09-30
+		r.Get("/batch/summary", app.Handlers.Attendance.GetBatchSummary)
+	})
 
 	return mux
 }

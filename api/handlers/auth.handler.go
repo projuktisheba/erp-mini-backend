@@ -17,12 +17,12 @@ type AuthHandler struct {
 	errorLog  *log.Logger
 }
 
-func NewAuthHandler(db *dbrepo.DBRepository,JWTConfig models.JWTConfig,  infoLog *log.Logger, errorLog *log.Logger) *AuthHandler {
+func NewAuthHandler(db *dbrepo.DBRepository, JWTConfig models.JWTConfig, infoLog *log.Logger, errorLog *log.Logger) *AuthHandler {
 	return &AuthHandler{
-		DB:       db,
+		DB:        db,
 		JWTConfig: JWTConfig,
-		infoLog:  infoLog,
-		errorLog: errorLog,
+		infoLog:   infoLog,
+		errorLog:  errorLog,
 	}
 }
 
@@ -40,13 +40,8 @@ func (h *AuthHandler) Signin(w http.ResponseWriter, r *http.Request) {
 
 	// Validate credentials from DB
 	user, err := h.DB.EmployeeRepo.GetEmployeeByEmail(r.Context(), req.Username)
-	if err != nil  {
-		h.errorLog.Println("ERROR_02_Signin: ", err)
-		utils.BadRequest(w, err)
-		return
-	}
-	if !utils.CheckPassword(req.Password, user.Password) {
-		h.errorLog.Println("ERROR_03_Signin: invalid credentials")
+	if err != nil || !utils.CheckPassword(req.Password, user.Password) {
+		h.errorLog.Println("ERROR_02_Signin: invalid credentials")
 		utils.BadRequest(w, errors.New("invalid username or password"))
 		return
 	}
@@ -62,7 +57,7 @@ func (h *AuthHandler) Signin(w http.ResponseWriter, r *http.Request) {
 	}, h.JWTConfig)
 
 	if err != nil {
-		h.errorLog.Println("ERROR_04_Signin: failed to generate JWT", err)
+		h.errorLog.Println("ERROR_03_Signin: failed to generate JWT", err)
 		utils.BadRequest(w, err)
 		return
 	}

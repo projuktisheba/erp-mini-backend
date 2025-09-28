@@ -65,10 +65,39 @@ type Employee struct {
 	Country      string    `json:"country"`
 	City         string    `json:"city"`
 	PostalCode   string    `json:"postal_code"`
-	VatID        string    `json:"tax_id"` //tax_id
+	TaxID        string    `json:"tax_id"` //tax_id
 	BaseSalary   float64   `json:"base_salary"`
 	OvertimeRate float64   `json:"overtime_rate"`
 	AvatarLink   string    `json:"avatar_link"`
 	CreatedAt    time.Time `json:"created_at"`
 	UpdatedAt    time.Time `json:"updated_at"`
+}
+
+type Attendance struct {
+	ID            int       `json:"id"`
+	EmployeeID    int       `json:"employee_id"`
+	WorkDate      time.Time `json:"work_date"`
+	Status        string    `json:"status"`
+	CheckIn       time.Time `json:"check_in,omitempty"`
+	CheckOut      time.Time `json:"check_out,omitempty"`
+	OvertimeHours int       `json:"overtime_hours"`
+	CreatedAt     time.Time `json:"created_at"`
+	UpdatedAt     time.Time `json:"updated_at"`
+}
+
+type AttendanceSummary struct {
+	EmployeeID         int    `json:"employee_id"`
+	EmployeeName       string `json:"employee_name"`
+	TotalWorkingDays   int    `json:"total_working_days"`
+	PresentDays        int    `json:"present_days"`
+	AbsentDays         int    `json:"absent_days"`
+	LeaveDays          int    `json:"leave_days"`
+	TotalOvertimeHours int    `json:"total_overtime_hours"`
+}
+
+type EmployeeCalendar struct {
+	EmployeeID   int           `json:"employee_id"`
+	EmployeeName string        `json:"employee_name"`
+	Month        string        `json:"month"`
+	Attendance   []*Attendance `json:"attendance"`
 }

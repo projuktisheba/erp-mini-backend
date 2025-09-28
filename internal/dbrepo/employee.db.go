@@ -29,7 +29,7 @@ func (user *EmployeeRepo) CreateEmployee(ctx context.Context, e *models.Employee
 	`
 	return user.db.QueryRow(ctx, query,
 		e.FirstName, e.LastName, e.Role, e.Status, e.Bio, e.Email, e.Password,
-		e.Mobile, e.Country, e.City, e.PostalCode, e.VatID,
+		e.Mobile, e.Country, e.City, e.PostalCode, e.TaxID,
 		e.BaseSalary, e.OvertimeRate, e.AvatarLink,
 	).Scan(&e.ID, &e.CreatedAt, &e.UpdatedAt)
 }
@@ -40,7 +40,7 @@ func (user *EmployeeRepo) GetEmployee(ctx context.Context, id int) (*models.Empl
 	e := &models.Employee{}
 	err := user.db.QueryRow(ctx, query, id).Scan(
 		&e.ID, &e.FirstName, &e.LastName, &e.Role, &e.Status, &e.Bio, &e.Email,
-		&e.Mobile, &e.Country, &e.City, &e.PostalCode, &e.VatID,
+		&e.Mobile, &e.Country, &e.City, &e.PostalCode, &e.TaxID,
 		&e.BaseSalary, &e.OvertimeRate, &e.AvatarLink,
 		&e.CreatedAt, &e.UpdatedAt,
 	)
@@ -59,7 +59,7 @@ func (user *EmployeeRepo) GetEmployeeByEmail(ctx context.Context, email string) 
 	e := &models.Employee{}
 	err := user.db.QueryRow(ctx, query).Scan(
 		&e.ID, &e.FirstName, &e.LastName, &e.Role, &e.Status, &e.Bio, &e.Email, &e.Password,
-		&e.Mobile, &e.Country, &e.City, &e.PostalCode, &e.VatID,
+		&e.Mobile, &e.Country, &e.City, &e.PostalCode, &e.TaxID,
 		&e.BaseSalary, &e.OvertimeRate, &e.AvatarLink,
 		&e.CreatedAt, &e.UpdatedAt,
 	)
@@ -81,8 +81,8 @@ func (user *EmployeeRepo) UpdateEmployee(ctx context.Context, e *models.Employee
 		RETURNING updated_at;
 	`
 	return user.db.QueryRow(ctx, query,
-		e.FirstName, e.LastName, e.Bio, e.Email, e.Mobile,
-		e.Country, e.City, e.PostalCode, e.VatID, e.AvatarLink, e.ID,
+		e.FirstName, e.LastName, e.Bio, e.Mobile,
+		e.Country, e.City, e.PostalCode, e.TaxID, e.AvatarLink, e.ID,
 	).Scan(&e.UpdatedAt)
 }
 
@@ -98,6 +98,7 @@ func (user *EmployeeRepo) UpdateEmployeeSalary(ctx context.Context, e *models.Em
 	return user.db.QueryRow(ctx, query,
 		e.BaseSalary,
 		e.OvertimeRate,
+		e.ID,
 	).Scan(&e.UpdatedAt)
 }
 
@@ -106,13 +107,14 @@ func (user *EmployeeRepo) UpdateEmployeeSalary(ctx context.Context, e *models.Em
 func (user *EmployeeRepo) UpdateEmployeeRole(ctx context.Context, e *models.Employee) error {
 	query := `
 		UPDATE employees
-		role =$1, status=$2, updated_at= CURRENT_TIMESTAMP
+		SET role =$1, status=$2, updated_at= CURRENT_TIMESTAMP
 		WHERE id=$3
 		RETURNING updated_at;
 	`
 	return user.db.QueryRow(ctx, query,
-		e.BaseSalary,
-		e.OvertimeRate,
+		e.Role,
+		e.Status,
+		e.ID,
 	).Scan(&e.UpdatedAt)
 }
 
@@ -136,7 +138,7 @@ func (user *EmployeeRepo) ListEmployees(ctx context.Context) ([]*models.Employee
 		var e models.Employee
 		err := rows.Scan(
 			&e.ID, &e.FirstName, &e.LastName, &e.Role, &e.Status, &e.Bio, &e.Email,
-			&e.Mobile, &e.Country, &e.City, &e.PostalCode, &e.VatID,
+			&e.Mobile, &e.Country, &e.City, &e.PostalCode, &e.TaxID,
 			&e.BaseSalary, &e.OvertimeRate, &e.AvatarLink,
 			&e.CreatedAt, &e.UpdatedAt,
 		)
@@ -206,7 +208,7 @@ func (e *EmployeeRepo) PaginatedEmployeeList(ctx context.Context, page, limit in
 		err := rows.Scan(
 			&emp.ID, &emp.FirstName, &emp.LastName, &emp.Role, &emp.Status,
 			&emp.Bio, &emp.Email, &emp.Mobile, &emp.Country, &emp.City,
-			&emp.PostalCode, &emp.VatID, &emp.BaseSalary, &emp.OvertimeRate,
+			&emp.PostalCode, &emp.TaxID, &emp.BaseSalary, &emp.OvertimeRate,
 			&emp.AvatarLink, &emp.CreatedAt, &emp.UpdatedAt,
 		)
 		if err != nil {

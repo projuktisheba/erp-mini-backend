@@ -12,6 +12,7 @@ import (
 
 	"os"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/projuktisheba/erp-mini-api/internal/dbrepo"
 	"github.com/projuktisheba/erp-mini-api/internal/models"
 	"github.com/projuktisheba/erp-mini-api/internal/utils"
@@ -46,7 +47,7 @@ func (e *EmployeeHandler) AddEmployee(w http.ResponseWriter, r *http.Request) {
 		log.Fatal(err)
 	}
 	employeeDetails.Password = hashed
-	
+
 	err = e.DB.CreateEmployee(r.Context(), &employeeDetails)
 	if err != nil {
 		e.errorLog.Println("ERROR_02_AddEmployee: ", err)
@@ -146,7 +147,7 @@ func (e *EmployeeHandler) UpdateEmployeeSalary(w http.ResponseWriter, r *http.Re
 		utils.BadRequest(w, err)
 		return
 	}
-
+	e.infoLog.Println(employeeDetails)
 	if employeeDetails.ID == 0 {
 		e.errorLog.Println("ERROR_02_UpdateEmployeeSalary: Missing employee ID")
 		utils.BadRequest(w, errors.New("missing employee ID"))
@@ -156,7 +157,11 @@ func (e *EmployeeHandler) UpdateEmployeeSalary(w http.ResponseWriter, r *http.Re
 	err = e.DB.UpdateEmployeeSalary(r.Context(), &employeeDetails)
 	if err != nil {
 		e.errorLog.Println("ERROR_03_UpdateEmployeeSalary: ", err)
-		utils.BadRequest(w, err)
+		if errors.Is(err, pgx.ErrNoRows) {
+			utils.BadRequest(w, errors.New("Invalid user id"))
+		} else {
+			utils.BadRequest(w, err)
+		}
 		return
 	}
 
