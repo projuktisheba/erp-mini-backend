@@ -16,5 +16,6 @@ type DBRepository struct {
 func NewDBRepository(db *pgxpool.Pool) *DBRepository {
 	return &DBRepository{
 		EmployeeRepo: NewEmployeeRepo(db),
+		AttendanceRepo: NewAttendanceRepo(db),
 	}
 }

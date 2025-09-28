@@ -64,6 +64,7 @@ type Employee struct {
 	Mobile       string    `json:"mobile"`
 	Country      string    `json:"country"`
 	City         string    `json:"city"`
+	Address      string    `json:"address"`
 	PostalCode   string    `json:"postal_code"`
 	TaxID        string    `json:"tax_id"` //tax_id
 	BaseSalary   float64   `json:"base_salary"`
@@ -76,10 +77,13 @@ type Employee struct {
 type Attendance struct {
 	ID            int       `json:"id"`
 	EmployeeID    int       `json:"employee_id"`
-	WorkDate      time.Time `json:"work_date"`
+	WorkDateStr   string    `json:"work_date"`
+	WorkDate      time.Time `json:"-"`
 	Status        string    `json:"status"`
-	CheckIn       time.Time `json:"check_in,omitempty"`
-	CheckOut      time.Time `json:"check_out,omitempty"`
+	CheckInStr    string    `json:"checkin"`
+	CheckOutStr   string    `json:"checkout"`
+	CheckIn       time.Time `json:"-"`
+	CheckOut      time.Time `json:"-"`
 	OvertimeHours int       `json:"overtime_hours"`
 	CreatedAt     time.Time `json:"created_at"`
 	UpdatedAt     time.Time `json:"updated_at"`

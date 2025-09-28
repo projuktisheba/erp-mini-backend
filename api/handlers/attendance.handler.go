@@ -2,8 +2,10 @@ package api
 
 import (
 	"errors"
+	"fmt"
 	"log"
 	"net/http"
+	"time"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/projuktisheba/erp-mini-api/internal/dbrepo"
@@ -26,9 +28,11 @@ func NewAttendanceHandler(db *dbrepo.AttendanceRepo, infoLog *log.Logger, errorL
 	}
 }
 
-// UpdateTodayAttendance updates attendance for the current day of a single employee
-func (a *AttendanceHandler) UpdateTodayAttendance(w http.ResponseWriter, r *http.Request) {
+// MarkEmployeePresent marks a single employee's attendance as present for today.
+func (a *AttendanceHandler) MarkEmployeePresent(w http.ResponseWriter, r *http.Request) {
 	var req models.Attendance
+
+	// Parse JSON request
 	err := utils.ReadJSON(w, r, &req)
 	if err != nil {
 		a.errorLog.Println("ERROR_01_UpdateTodayAttendance:", err)
@@ -36,34 +40,101 @@ func (a *AttendanceHandler) UpdateTodayAttendance(w http.ResponseWriter, r *http
 		return
 	}
 
+	// Check required field
 	if req.EmployeeID == 0 {
 		a.errorLog.Println("ERROR_02_UpdateTodayAttendance: Missing employee ID")
 		utils.BadRequest(w, errors.New("missing employee ID"))
 		return
 	}
 
-	err = a.DB.UpdateTodayAttendance(r.Context(), req.EmployeeID, req.Status, req.CheckIn, req.CheckOut, req.OvertimeHours)
+	workDate, err := time.Parse("2006-01-02", req.WorkDateStr)
 	if err != nil {
-		a.errorLog.Println("ERROR_03_UpdateTodayAttendance:", err)
+		a.errorLog.Printf("ERROR_XX: Invalid work_date %q for employee %d", req.WorkDate, req.EmployeeID)
+		utils.BadRequest(w, fmt.Errorf("invalid work_date format for employee %d, expected YYYY-MM-DD", req.EmployeeID))
+		return
+	}
+
+	// Parse check-in time (24-hour)
+	checkInTime, err := time.Parse("15:04", req.CheckInStr)
+	if err != nil {
+		a.errorLog.Println("ERROR_03_UpdateTodayAttendance: Invalid CheckInStr:", req.CheckInStr)
+		utils.BadRequest(w, errors.New("invalid check-in time format, expected HH:MM (24h)"))
+		return
+	}
+	checkInTime = time.Date(workDate.Year(), workDate.Month(), workDate.Day(),
+		checkInTime.Hour(), checkInTime.Minute(), 0, 0, time.UTC)
+
+	// Parse check-out time (24-hour)
+	checkOutTime, err := time.Parse("15:04", req.CheckOutStr)
+	if err != nil {
+		a.errorLog.Println("ERROR_04_UpdateTodayAttendance: Invalid CheckOutStr:", req.CheckOutStr)
+		utils.BadRequest(w, errors.New("invalid check-out time format, expected HH:MM (24h)"))
+		return
+	}
+	checkOutTime = time.Date(workDate.Year(), workDate.Month(), workDate.Day(),
+		checkOutTime.Hour(), checkOutTime.Minute(), 0, 0, time.UTC)
+
+	// Handle overnight shift
+	if checkOutTime.Before(checkInTime) {
+		checkOutTime = checkOutTime.Add(24 * time.Hour)
+	}
+
+	req.CheckIn = checkInTime
+	req.CheckOut = checkOutTime
+	req.WorkDate = workDate
+	req.Status = "Present"
+
+	// Calculate overtime if duration > 0
+	calculatedOvertime := 0
+	if !checkInTime.Equal(checkOutTime) {
+		duration := checkOutTime.Sub(checkInTime)
+		calculatedOvertime = max(int(duration.Hours())-8, 0)
+
+		// Validate user-provided overtime
+		if req.OvertimeHours != calculatedOvertime {
+			errMsg := fmt.Sprintf(
+				"provided overtime_hours (%d) does not match calculated overtime (%d)",
+				req.OvertimeHours, calculatedOvertime,
+			)
+			a.errorLog.Println("ERROR_05_UpdateTodayAttendance:", errMsg)
+			utils.BadRequest(w, errors.New(errMsg))
+			return
+		}
+	}
+
+	// Assign validated/corrected overtime
+	req.OvertimeHours = calculatedOvertime
+
+	// Update DB
+	err = a.DB.UpdateTodayAttendance(r.Context(), req)
+	if err != nil {
+		a.errorLog.Println("ERROR_06_UpdateTodayAttendance DB:", err)
 		utils.BadRequest(w, err)
 		return
 	}
 
-	var resp struct {
-		Error   bool   `json:"error"`
-		Status  string `json:"status"`
-		Message string `json:"message"`
+	// Respond success
+	resp := struct {
+		Error         bool   `json:"error"`
+		Status        string `json:"status"`
+		Message       string `json:"message"`
+		OvertimeHours int    `json:"overtime_hours"`
+	}{
+		Error:         false,
+		Status:        "success",
+		Message:       "Attendance updated successfully",
+		OvertimeHours: req.OvertimeHours,
 	}
-	resp.Error = false
-	resp.Status = "success"
-	resp.Message = "Attendance updated successfully"
 
 	utils.WriteJSON(w, http.StatusOK, resp)
 }
 
-// BatchUpdateTodayAttendance updates today's attendance for multiple employees
-func (a *AttendanceHandler) BatchUpdateTodayAttendance(w http.ResponseWriter, r *http.Request) {
+// MarkEmployeesPresentBatch marks today's attendance for multiple employees as present.
+func (a *AttendanceHandler) MarkEmployeesPresentBatch(w http.ResponseWriter, r *http.Request) {
+
 	var req []*models.Attendance
+
+	// Parse JSON request
 	err := utils.ReadJSON(w, r, &req)
 	if err != nil {
 		a.errorLog.Println("ERROR_01_BatchUpdateTodayAttendance:", err)
@@ -77,21 +148,95 @@ func (a *AttendanceHandler) BatchUpdateTodayAttendance(w http.ResponseWriter, r 
 		return
 	}
 
+	// Validate and normalize each record
+	for _, att := range req {
+		if att.EmployeeID == 0 {
+			a.errorLog.Println("ERROR_03_BatchUpdateTodayAttendance: Missing employee ID")
+			utils.BadRequest(w, fmt.Errorf("missing employee ID for one of the records"))
+			return
+		}
+		// Parse work_date from payload
+		workDate, err := time.Parse("2006-01-02", att.WorkDateStr)
+		if err != nil {
+			a.errorLog.Printf("ERROR_XX: Invalid work_date %q for employee %d", att.WorkDateStr, att.EmployeeID)
+			utils.BadRequest(w, fmt.Errorf("invalid work_date format for employee %d, expected YYYY-MM-DD", att.EmployeeID))
+			return
+		}
+
+		// Parse check-in
+		checkInTime, err := time.Parse("15:04", att.CheckInStr)
+		if err != nil {
+			a.errorLog.Printf("ERROR_04_BatchUpdateTodayAttendance: Invalid CheckInStr %q for employee %d", att.CheckInStr, att.EmployeeID)
+			utils.BadRequest(w, fmt.Errorf("invalid check-in time format for employee %d, expected HH:MM (24h)", att.EmployeeID))
+			return
+		}
+		checkInTime = time.Date(workDate.Year(), workDate.Month(), workDate.Day(),
+			checkInTime.Hour(), checkInTime.Minute(), 0, 0, time.UTC)
+
+		// Parse check-out
+		checkOutTime, err := time.Parse("15:04", att.CheckOutStr)
+		if err != nil {
+			a.errorLog.Printf("ERROR_05_BatchUpdateTodayAttendance: Invalid CheckOutStr %q for employee %d", att.CheckOutStr, att.EmployeeID)
+			utils.BadRequest(w, fmt.Errorf("invalid check-out time format for employee %d, expected HH:MM (24h)", att.EmployeeID))
+			return
+		}
+		checkOutTime = time.Date(workDate.Year(), workDate.Month(), workDate.Day(),
+			checkOutTime.Hour(), checkOutTime.Minute(), 0, 0, time.UTC)
+
+		// Handle overnight shift
+		if checkOutTime.Before(checkInTime) {
+			checkOutTime = checkOutTime.Add(24 * time.Hour)
+		}
+
+		// Assign times
+		att.CheckIn = checkInTime
+		att.CheckOut = checkOutTime
+		att.WorkDate = workDate
+
+		att.Status = "Present"
+
+		// Calculate overtime
+		var calculatedOvertime int
+		if !checkInTime.Equal(checkOutTime) {
+			duration := checkOutTime.Sub(checkInTime)
+			calculatedOvertime = max(int(duration.Hours())-8, 0)
+
+			// Validate user-provided overtime
+			if att.OvertimeHours != calculatedOvertime {
+				errMsg := fmt.Sprintf("employee %d: provided overtime_hours (%d) does not match calculated overtime (%d)",
+					att.EmployeeID, att.OvertimeHours, calculatedOvertime)
+				a.errorLog.Println("ERROR_06_BatchUpdateTodayAttendance:", errMsg)
+				utils.BadRequest(w, errors.New(errMsg))
+				return
+			}
+		} else {
+			// Zero duration = no overtime
+			calculatedOvertime = 0
+			att.OvertimeHours = 0
+		}
+
+		// Set validated overtime
+		att.OvertimeHours = calculatedOvertime
+	}
+
+	// Save all records
 	err = a.DB.BatchUpdateTodayAttendance(r.Context(), req)
 	if err != nil {
-		a.errorLog.Println("ERROR_03_BatchUpdateTodayAttendance:", err)
+		a.errorLog.Println("ERROR_07_BatchUpdateTodayAttendance DB:", err)
 		utils.BadRequest(w, err)
 		return
 	}
 
-	var resp struct {
+	// Respond success
+	resp := struct {
 		Error   bool   `json:"error"`
 		Status  string `json:"status"`
 		Message string `json:"message"`
+	}{
+		Error:   false,
+		Status:  "success",
+		Message: "Batch attendance updated successfully",
 	}
-	resp.Error = false
-	resp.Status = "success"
-	resp.Message = "Batch attendance updated successfully"
 
 	utils.WriteJSON(w, http.StatusOK, resp)
 }

@@ -357,19 +357,31 @@ func (e *EmployeeHandler) UploadEmployeeProfilePicture(w http.ResponseWriter, r 
 		return
 	}
 
-	// --- Step 8: Return success response with relative path ---
-	relativePath := filepath.ToSlash(strings.TrimPrefix(filePath, "."))
+	// --- Step 8: check whether profile picture is saved ---
+	if _, err := os.Stat(filePath); err != nil {
+		e.errorLog.Println("ERROR_09_UploadEmployeeProfilePicture: File not saved", err)
+		utils.BadRequest(w, errors.New("profile picture not saved"))
+		return
+	}
+	avatarLink := fmt.Sprintf("/images/employee_%d/profile%s", id, ext) ///images/employee_1/profile.png
+
+	err = e.DB.UpdateEmployeeAvatarLink(r.Context(), id, avatarLink)
+	if err != nil {
+		e.errorLog.Println("ERROR_10_UploadEmployeeProfilePicture: File saved but unable to update database", err)
+		utils.BadRequest(w, errors.New("file saved but unable to update database"))
+		return
+	}
 
 	resp := struct {
-		Error   bool   `json:"error"`
-		Status  string `json:"status"`
-		Message string `json:"message"`
-		Path    string `json:"profile_picture_path"`
+		Error      bool   `json:"error"`
+		Status     string `json:"status"`
+		Message    string `json:"message"`
+		AvatarLink string `json:"avatar_link"`
 	}{
-		Error:   false,
-		Status:  "success",
-		Message: "Profile picture uploaded successfully",
-		Path:    relativePath,
+		Error:      false,
+		Status:     "success",
+		Message:    "Profile picture uploaded successfully",
+		AvatarLink: avatarLink,
 	}
 
 	utils.WriteJSON(w, http.StatusOK, resp)

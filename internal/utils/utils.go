@@ -133,3 +133,16 @@ func CheckPassword(password, hashed string) bool {
 	err := bcrypt.CompareHashAndPassword([]byte(hashed), []byte(password))
 	return err == nil
 }
+
+// Today returns the current date with time set to 00:00:00
+func Today() time.Time {
+	now := time.Now()
+	return time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, now.Location())
+}
+// NullableTime converts zero time to nil
+func NullableTime(t time.Time) any {
+	if t.IsZero() {
+		return nil
+	}
+	return t
+}

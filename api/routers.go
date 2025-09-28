@@ -53,12 +53,12 @@ func (app *application) routes() http.Handler {
 
 		// Upload employee profile picture (Form Data: id, profile_picture)
 		// Example: POST /api/v1/hr/profile-picture
-		// Form fields: id=5, profile_picture=@/path/to/image.jpg
+		// Form fields: id=5, profile_picture=file
 		r.Post("/employee/profile-picture", app.Handlers.Employee.UploadEmployeeProfilePicture)
 
 		// Update general employee details
 		// Example: PUT /api/v1/hr/employee
-		// Body (JSON): { employee }
+		// Body (JSON): { id,first_name,last_name,bio,mobile,country,city, address, postal_code, tax_id }
 		r.Put("/employee", app.Handlers.Employee.UpdateEmployee)
 
 		// Update employee salary and overtime rate (Admin only)
@@ -75,13 +75,13 @@ func (app *application) routes() http.Handler {
 	mux.Route("/api/v1/hr/attendance", func(r chi.Router) {
 		// Mark or update today's attendance for a single employee
 		// Example: POST /api/v1/hr/attendance/5
-		// Body (JSON): { checkin: "09:00", checkout: "18:00", overtime_hours: 2 }
-		r.Post("/{employeeID}", app.Handlers.Attendance.UpdateTodayAttendance)
+		// Body (JSON): { id:1 checkin: "09:00", checkout: "18:00", overtime_hours: 2 }
+		r.Post("/present/single", app.Handlers.Attendance.MarkEmployeePresent)
 
 		// Batch update today's attendance for multiple employees
 		// Example: POST /api/v1/hr/attendance/batch
 		// Body (JSON): { attendances: [ {id: 5, checkin: "09:00", checkout: "18:00"}, ... ] }
-		r.Post("/batch", app.Handlers.Attendance.BatchUpdateTodayAttendance)
+		r.Post("/present/batch", app.Handlers.Attendance.MarkEmployeesPresentBatch)
 
 		// Get calendar-style attendance for one employee (monthly or date range)
 		// Example: GET /api/v1/hr/attendance/5/calendar?month=2025-09

@@ -23,24 +23,24 @@ func NewEmployeeRepo(db *pgxpool.Pool) *EmployeeRepo {
 func (user *EmployeeRepo) CreateEmployee(ctx context.Context, e *models.Employee) error {
 	query := `
 		INSERT INTO employees 
-		(fname, lname, role, status, bio, email, password, mobile, country, city, postal_code, tax_id, base_salary, overtime_rate, avatar_link, created_at, updated_at)
-		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,CURRENT_TIMESTAMP,CURRENT_TIMESTAMP)
+		(fname, lname, role, status, bio, email, password, mobile, country, city, address, postal_code, tax_id, base_salary, overtime_rate, avatar_link, created_at, updated_at)
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,CURRENT_TIMESTAMP,CURRENT_TIMESTAMP)
 		RETURNING id, created_at, updated_at;
 	`
 	return user.db.QueryRow(ctx, query,
 		e.FirstName, e.LastName, e.Role, e.Status, e.Bio, e.Email, e.Password,
-		e.Mobile, e.Country, e.City, e.PostalCode, e.TaxID,
+		e.Mobile, e.Country, e.City, e.Address, e.PostalCode, e.TaxID,
 		e.BaseSalary, e.OvertimeRate, e.AvatarLink,
 	).Scan(&e.ID, &e.CreatedAt, &e.UpdatedAt)
 }
 
 // GetEmployee fetches an employee by ID
 func (user *EmployeeRepo) GetEmployee(ctx context.Context, id int) (*models.Employee, error) {
-	query := `SELECT id, fname, lname, role, status, bio, email, mobile, country, city, postal_code, tax_id, base_salary, overtime_rate, avatar_link, created_at, updated_at FROM employees WHERE id=$1`
+	query := `SELECT id, fname, lname, role, status, bio, email, mobile, country, city, address, postal_code, tax_id, base_salary, overtime_rate, avatar_link, created_at, updated_at FROM employees WHERE id=$1`
 	e := &models.Employee{}
 	err := user.db.QueryRow(ctx, query, id).Scan(
 		&e.ID, &e.FirstName, &e.LastName, &e.Role, &e.Status, &e.Bio, &e.Email,
-		&e.Mobile, &e.Country, &e.City, &e.PostalCode, &e.TaxID,
+		&e.Mobile, &e.Country, &e.City, &e.Address, &e.PostalCode, &e.TaxID,
 		&e.BaseSalary, &e.OvertimeRate, &e.AvatarLink,
 		&e.CreatedAt, &e.UpdatedAt,
 	)
@@ -55,11 +55,11 @@ func (user *EmployeeRepo) GetEmployee(ctx context.Context, id int) (*models.Empl
 
 // GetEmployee fetches an employee by email
 func (user *EmployeeRepo) GetEmployeeByEmail(ctx context.Context, email string) (*models.Employee, error) {
-	query := fmt.Sprintf(`SELECT id, fname, lname, role, status, bio, email, password, mobile, country, city, postal_code, tax_id, base_salary, overtime_rate, avatar_link, created_at, updated_at FROM employees WHERE email='%s'`, email)
+	query := fmt.Sprintf(`SELECT id, fname, lname, role, status, bio, email, password, mobile, country, city, address, postal_code, tax_id, base_salary, overtime_rate, avatar_link, created_at, updated_at FROM employees WHERE email='%s'`, email)
 	e := &models.Employee{}
 	err := user.db.QueryRow(ctx, query).Scan(
 		&e.ID, &e.FirstName, &e.LastName, &e.Role, &e.Status, &e.Bio, &e.Email, &e.Password,
-		&e.Mobile, &e.Country, &e.City, &e.PostalCode, &e.TaxID,
+		&e.Mobile, &e.Country, &e.City, &e.Address, &e.PostalCode, &e.TaxID,
 		&e.BaseSalary, &e.OvertimeRate, &e.AvatarLink,
 		&e.CreatedAt, &e.UpdatedAt,
 	)
@@ -76,16 +76,27 @@ func (user *EmployeeRepo) GetEmployeeByEmail(ctx context.Context, email string) 
 func (user *EmployeeRepo) UpdateEmployee(ctx context.Context, e *models.Employee) error {
 	query := `
 		UPDATE employees
-		SET fname=$1, lname=$2, bio=$3, mobile=$4, country=$5, city=$6, postal_code=$7, tax_id=$8,  avatar_link=$9, updated_at= CURRENT_TIMESTAMP
+		SET fname=$1, lname=$2, bio=$3, mobile=$4, country=$5, city=$6, address=$7, postal_code=$8, tax_id=$9, updated_at= CURRENT_TIMESTAMP
 		WHERE id=$10
 		RETURNING updated_at;
 	`
 	return user.db.QueryRow(ctx, query,
 		e.FirstName, e.LastName, e.Bio, e.Mobile,
-		e.Country, e.City, e.PostalCode, e.TaxID, e.AvatarLink, e.ID,
+		e.Country, e.City, e.Address, e.PostalCode, e.TaxID, e.ID,
 	).Scan(&e.UpdatedAt)
 }
 
+// UpdateEmployeeAvatarLink updates employee avatar_link field
+func (user *EmployeeRepo) UpdateEmployeeAvatarLink(ctx context.Context, id int, avatarLink string) error {
+	query := `
+		UPDATE employees
+		SET avatar_link=$1, updated_at= CURRENT_TIMESTAMP
+		WHERE id=$2
+		RETURNING updated_at;
+	`
+	_, err:= user.db.Exec(ctx, query,avatarLink, id)
+	return err
+}
 // UpdateEmployeeSalary updates employee salary and overtime rate
 // Call this function if the role of the token user is Admin
 func (user *EmployeeRepo) UpdateEmployeeSalary(ctx context.Context, e *models.Employee) error {
@@ -126,7 +137,7 @@ func (user *EmployeeRepo) DeleteEmployee(ctx context.Context, id int) error {
 
 // ListEmployees fetches all employees
 func (user *EmployeeRepo) ListEmployees(ctx context.Context) ([]*models.Employee, error) {
-	query := `SELECT id, fname, lname, role, status, bio, email, mobile, country, city, postal_code, tax_id, base_salary, overtime_rate, avatar_link, created_at, updated_at FROM employees ORDER BY id`
+	query := `SELECT id, fname, lname, role, status, bio, email, mobile, country, city, address, postal_code, tax_id, base_salary, overtime_rate, avatar_link, created_at, updated_at FROM employees ORDER BY id`
 	rows, err := user.db.Query(ctx, query)
 	if err != nil {
 		return nil, err
@@ -138,7 +149,7 @@ func (user *EmployeeRepo) ListEmployees(ctx context.Context) ([]*models.Employee
 		var e models.Employee
 		err := rows.Scan(
 			&e.ID, &e.FirstName, &e.LastName, &e.Role, &e.Status, &e.Bio, &e.Email,
-			&e.Mobile, &e.Country, &e.City, &e.PostalCode, &e.TaxID,
+			&e.Mobile, &e.Country, &e.City, &e.Address, &e.PostalCode, &e.TaxID,
 			&e.BaseSalary, &e.OvertimeRate, &e.AvatarLink,
 			&e.CreatedAt, &e.UpdatedAt,
 		)
@@ -151,13 +162,12 @@ func (user *EmployeeRepo) ListEmployees(ctx context.Context) ([]*models.Employee
 }
 
 // PaginatedEmployeeList returns a paginated list of employees with optional role & status filters.
-// PaginatedEmployeeList returns a paginated list of employees with optional role & status filters.
 func (e *EmployeeRepo) PaginatedEmployeeList(ctx context.Context, page, limit int, role, status string) ([]*models.Employee, int, error) {
 	offset := (page - 1) * limit
 
 	// Base queries
 	query := `SELECT id, fname, lname, role, status, bio, email, mobile,
-	                 country, city, postal_code, tax_id, base_salary, overtime_rate,
+	                 country, city, address, postal_code, tax_id, base_salary, overtime_rate,
 	                 avatar_link, created_at, updated_at
 	          FROM employees
 	          WHERE 1=1`
@@ -207,7 +217,7 @@ func (e *EmployeeRepo) PaginatedEmployeeList(ctx context.Context, page, limit in
 		var emp models.Employee
 		err := rows.Scan(
 			&emp.ID, &emp.FirstName, &emp.LastName, &emp.Role, &emp.Status,
-			&emp.Bio, &emp.Email, &emp.Mobile, &emp.Country, &emp.City,
+			&emp.Bio, &emp.Email, &emp.Mobile, &emp.Country, &emp.City, &emp.Address,
 			&emp.PostalCode, &emp.TaxID, &emp.BaseSalary, &emp.OvertimeRate,
 			&emp.AvatarLink, &emp.CreatedAt, &emp.UpdatedAt,
 		)

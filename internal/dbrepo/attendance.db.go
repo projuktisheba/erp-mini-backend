@@ -3,11 +3,12 @@ package dbrepo
 import (
 	"context"
 	"errors"
-	"time"
+	"fmt"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/projuktisheba/erp-mini-api/internal/models"
+	"github.com/projuktisheba/erp-mini-api/internal/utils"
 )
 
 // ============================== Attendance Repository ==============================
@@ -21,10 +22,11 @@ func NewAttendanceRepo(db *pgxpool.Pool) *AttendanceRepo {
 
 // ----------------- SINGLE UPDATE -----------------
 
-func (a *AttendanceRepo) UpdateTodayAttendance(ctx context.Context, employeeID int, status string, checkIn, checkOut time.Time, overtimeMinutes int) error {
+func (a *AttendanceRepo) UpdateTodayAttendance(ctx context.Context, employeeAttendance models.Attendance) error {
+	// Insert or update in DB
 	query := `
 		INSERT INTO attendance (employee_id, work_date, status, check_in, check_out, overtime_hours)
-		VALUES ($1, CURRENT_DATE, $2, $3, $4, $5)
+		VALUES ($1, $2, $3, $4, $5, $6)
 		ON CONFLICT (employee_id, work_date)
 		DO UPDATE SET status = EXCLUDED.status,
 					  check_in = EXCLUDED.check_in,
@@ -33,35 +35,48 @@ func (a *AttendanceRepo) UpdateTodayAttendance(ctx context.Context, employeeID i
 					  updated_at = CURRENT_TIMESTAMP;
 	`
 
-	_, err := a.db.Exec(ctx, query, employeeID, status, checkIn, checkOut, overtimeMinutes)
+	_, err := a.db.Exec(ctx, query,
+		employeeAttendance.EmployeeID,
+		employeeAttendance.WorkDate,
+		employeeAttendance.Status,
+		employeeAttendance.CheckIn,
+		employeeAttendance.CheckOut,
+		employeeAttendance.OvertimeHours,
+	)
+
 	return err
 }
 
 // ----------------- BATCH UPDATE -----------------
-
 func (a *AttendanceRepo) BatchUpdateTodayAttendance(ctx context.Context, entries []*models.Attendance) error {
+	if len(entries) == 0 {
+		return nil
+	}
+
 	batch := &pgx.Batch{}
 	for _, e := range entries {
 		batch.Queue(`
 			INSERT INTO attendance (employee_id, work_date, status, check_in, check_out, overtime_hours)
-			VALUES ($1, CURRENT_DATE, $2, $3, $4, $5)
+			VALUES ($1, $2, $3, $4, $5, $6)
 			ON CONFLICT (employee_id, work_date)
 			DO UPDATE SET status = EXCLUDED.status,
 						  check_in = EXCLUDED.check_in,
 						  check_out = EXCLUDED.check_out,
 						  overtime_hours = EXCLUDED.overtime_hours,
 						  updated_at = CURRENT_TIMESTAMP;
-		`, e.EmployeeID, e.Status, e.CheckIn, e.CheckOut, e.OvertimeHours)
+		`, e.EmployeeID, e.WorkDate, e.Status, utils.NullableTime(e.CheckIn), utils.NullableTime(e.CheckOut), e.OvertimeHours)
 	}
 
 	br := a.db.SendBatch(ctx, batch)
 	defer br.Close()
-	for range entries {
+
+	for _, e := range entries {
 		_, err := br.Exec()
 		if err != nil {
-			return err
+			return fmt.Errorf("failed to update attendance for employee %d: %w", e.EmployeeID, err)
 		}
 	}
+
 	return nil
 }
 
