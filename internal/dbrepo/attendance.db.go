@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strconv"
+	"time"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -82,59 +84,124 @@ func (a *AttendanceRepo) BatchUpdateTodayAttendance(ctx context.Context, entries
 
 // ----------------- CALENDAR -----------------
 
-func (a *AttendanceRepo) GetEmployeeCalendar(ctx context.Context, employeeID string, month, start, end string) (*models.EmployeeCalendar, error) {
+func (a *AttendanceRepo) GetEmployeeCalendar(ctx context.Context, employeeIDStr, month, start, end string) (*models.EmployeeCalendar, error) {
+	// Convert employeeID to int
+	empID, err := strconv.Atoi(employeeIDStr)
+	if err != nil {
+		return nil, fmt.Errorf("invalid employee ID: %s", employeeIDStr)
+	}
+
 	var query string
 	var rows pgx.Rows
-	var err error
 
+	// Month query
 	if month != "" {
-		query = `
-			SELECT a.id, a.employee_id, e.fname || ' ' || e.lname AS employee_name,
-				   a.work_date, a.status, a.check_in, a.check_out, a.overtime_hours,
-				   a.created_at, a.updated_at
-			FROM attendance a
-			JOIN employees e ON e.id = a.employee_id
-			WHERE a.employee_id = $1
-			  AND DATE_TRUNC('month', a.work_date) = DATE_TRUNC('month', TO_DATE($2, 'YYYY-MM'))
-			ORDER BY a.work_date;
-		`
-		rows, err = a.db.Query(ctx, query, employeeID, month)
-	} else if start != "" && end != "" {
-		query = `
-			SELECT a.id, a.employee_id, e.fname || ' ' || e.lname AS employee_name,
-				   a.work_date, a.status, a.check_in, a.check_out, a.overtime_hours,
-				   a.created_at, a.updated_at
-			FROM attendance a
-			JOIN employees e ON e.id = a.employee_id
-			WHERE a.employee_id = $1
-			  AND a.work_date BETWEEN $2 AND $3
-			ORDER BY a.work_date;
-		`
-		rows, err = a.db.Query(ctx, query, employeeID, start, end)
-	} else {
-		return nil, errors.New("either month or start/end date required")
-	}
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
+		monthTime, err := time.Parse("2006-01", month)
+		if err != nil {
+			return nil, fmt.Errorf("invalid month format, expected YYYY-MM")
+		}
 
-	var calendar models.EmployeeCalendar
-	var attendances []*models.Attendance
-	for rows.Next() {
-		var a models.Attendance
-		var employeeName string
-		err = rows.Scan(&a.ID, &a.EmployeeID, &employeeName, &a.WorkDate, &a.Status, &a.CheckIn, &a.CheckOut, &a.OvertimeHours, &a.CreatedAt, &a.UpdatedAt)
+		query = `
+			SELECT a.id, a.employee_id, e.fname || ' ' || e.lname AS employee_name,
+				   a.work_date, a.status, a.check_in, a.check_out, a.overtime_hours,
+				   a.created_at, a.updated_at
+			FROM attendance a
+			JOIN employees e ON e.id = a.employee_id
+			WHERE a.employee_id = $1
+			  AND DATE_TRUNC('month', a.work_date) = DATE_TRUNC('month', $2::date)
+			ORDER BY a.work_date;
+		`
+		rows, err = a.db.Query(ctx, query, empID, monthTime.Format("2006-01-02"))
 		if err != nil {
 			return nil, err
 		}
+
+		// Start/End range query
+	} else if start != "" && end != "" {
+		startDate, err := time.Parse("2006-01-02", start)
+		if err != nil {
+			return nil, fmt.Errorf("invalid start date format, expected YYYY-MM-DD")
+		}
+		endDate, err := time.Parse("2006-01-02", end)
+		if err != nil {
+			return nil, fmt.Errorf("invalid end date format, expected YYYY-MM-DD")
+		}
+
+		query = `
+			SELECT a.id, a.employee_id, e.fname || ' ' || e.lname AS employee_name,
+				   a.work_date, a.status, a.check_in, a.check_out, a.overtime_hours,
+				   a.created_at, a.updated_at
+			FROM attendance a
+			JOIN employees e ON e.id = a.employee_id
+			WHERE a.employee_id = $1
+			  AND a.work_date BETWEEN $2::date AND $3::date
+			ORDER BY a.work_date;
+		`
+		rows, err = a.db.Query(ctx, query, empID, startDate.Format("2006-01-02"), endDate.Format("2006-01-02"))
+		if err != nil {
+			return nil, err
+		}
+
+	} else {
+		query = `
+			SELECT a.id, a.employee_id, e.fname || ' ' || e.lname AS employee_name,
+				   a.work_date, a.status, a.check_in, a.check_out, a.overtime_hours,
+				   a.created_at, a.updated_at
+			FROM attendance a
+			JOIN employees e ON e.id = a.employee_id
+			WHERE a.employee_id = $1
+			ORDER BY a.work_date;
+		`
+		rows, err = a.db.Query(ctx, query, empID)
+		if err != nil {
+			return nil, err
+		}
+	}
+
+	defer rows.Close()
+
+	// Initialize calendar and attendance slice
+	calendar := &models.EmployeeCalendar{
+		Attendance: []*models.Attendance{},
+	}
+
+	for rows.Next() {
+		var a models.Attendance
+		var employeeName string
+
+		err = rows.Scan(
+			&a.ID, &a.EmployeeID, &employeeName,
+			&a.WorkDate, &a.Status, &a.CheckIn, &a.CheckOut, &a.OvertimeHours,
+			&a.CreatedAt, &a.UpdatedAt,
+		)
+		if err != nil {
+			return nil, err
+		}
+		a.WorkDateStr = a.WorkDate.Format("2006-01-02")
+		if !a.CheckIn.IsZero() {
+			a.CheckInStr = a.CheckIn.Format("15:04")
+		}
+		if !a.CheckOut.IsZero() {
+			a.CheckOutStr = a.CheckOut.Format("15:04")
+		}
 		calendar.EmployeeID = a.EmployeeID
 		calendar.EmployeeName = employeeName
-		attendances = append(attendances, &a)
+		calendar.Attendance = append(calendar.Attendance, &a)
 	}
-	calendar.Attendance = attendances
-	calendar.Month = month
-	return &calendar, nil
+
+	// Check for iteration errors
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+
+	// Set calendar month for reference
+	if month != "" {
+		calendar.Month = month
+	} else if start != "" {
+		calendar.Month = start[:7] // YYYY-MM from start date
+	}
+
+	return calendar, nil
 }
 
 // ----------------- SUMMARY -----------------

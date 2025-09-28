@@ -243,7 +243,7 @@ func (a *AttendanceHandler) MarkEmployeesPresentBatch(w http.ResponseWriter, r *
 
 // GetEmployeeCalendar fetches calendar-style attendance for an employee (month or date range)
 func (a *AttendanceHandler) GetEmployeeCalendar(w http.ResponseWriter, r *http.Request) {
-	employeeID := chi.URLParam(r, "employeeID")
+	employeeID := r.URL.Query().Get("employee_id")
 	month := r.URL.Query().Get("month")
 	start := r.URL.Query().Get("start")
 	end := r.URL.Query().Get("end")

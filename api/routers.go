@@ -84,9 +84,9 @@ func (app *application) routes() http.Handler {
 		r.Post("/present/batch", app.Handlers.Attendance.MarkEmployeesPresentBatch)
 
 		// Get calendar-style attendance for one employee (monthly or date range)
-		// Example: GET /api/v1/hr/attendance/5/calendar?month=2025-09
-		// Example: GET /api/v1/hr/attendance/5/calendar?start=2025-09-01&end=2025-09-15
-		r.Get("/{employeeID}/calendar", app.Handlers.Attendance.GetEmployeeCalendar)
+		// Example: GET /api/v1/hr/attendance/calendar?employee_id=1&month=2025-09
+		// Example: GET /api/v1/hr/attendance/calendar?employee_id=1&start=2025-09-01&end=2025-09-15
+		r.Get("/calendar", app.Handlers.Attendance.GetEmployeeCalendar)
 
 		// Get monthly attendance summary (working days, overtime, etc.) for one employee
 		// Example: GET /api/v1/hr/attendance/5/summary?month=2025-09
