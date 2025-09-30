@@ -100,7 +100,36 @@ func (e *EmployeeHandler) GetEmployee(w http.ResponseWriter, r *http.Request) {
 
 	utils.WriteJSON(w, 200, resp)
 }
+func (h *EmployeeHandler) GetEmployeesNameAndID(w http.ResponseWriter, r *http.Request) {
+	employees, err := h.DB.GetEmployeesNameAndID(r.Context())
+	var resp struct {
+		Error     bool                     `json:"error"`
+		Status    string                   `json:"status"`
+		Message   string                   `json:"message"`
+		Employees []*models.EmployeeNameID `json:"employees"`
+	}
+	if err != nil {
+		h.errorLog.Println("ERROR_01_GetEmployeesNameAndID:", err)
+		resp.Error = true
+		resp.Status = "Empty"
+		resp.Message = "No employees found"
+		utils.WriteJSON(w, 200, resp)
+		return
+	}
 
+	if len(employees) == 0 {
+		utils.NotFound(w, "No employees found")
+		return
+	}
+
+	
+	resp.Error = false
+	resp.Status = "success"
+	resp.Message = "Employee Names and IDs fetched successfully"
+	resp.Employees = employees
+
+	utils.WriteJSON(w, http.StatusOK, resp)
+}
 // UpdateEmployee updates general employee details
 func (e *EmployeeHandler) UpdateEmployee(w http.ResponseWriter, r *http.Request) {
 	var employeeDetails models.Employee

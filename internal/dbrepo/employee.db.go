@@ -10,7 +10,7 @@ import (
 	"github.com/projuktisheba/erp-mini-api/internal/models"
 )
 
-// ============================== User Repository ==============================
+// ============================== Employee Repository ==============================
 type EmployeeRepo struct {
 	db *pgxpool.Pool
 }
@@ -94,9 +94,10 @@ func (user *EmployeeRepo) UpdateEmployeeAvatarLink(ctx context.Context, id int, 
 		WHERE id=$2
 		RETURNING updated_at;
 	`
-	_, err:= user.db.Exec(ctx, query,avatarLink, id)
+	_, err := user.db.Exec(ctx, query, avatarLink, id)
 	return err
 }
+
 // UpdateEmployeeSalary updates employee salary and overtime rate
 // Call this function if the role of the token user is Admin
 func (user *EmployeeRepo) UpdateEmployeeSalary(ctx context.Context, e *models.Employee) error {
@@ -159,6 +160,32 @@ func (user *EmployeeRepo) ListEmployees(ctx context.Context) ([]*models.Employee
 		employees = append(employees, &e)
 	}
 	return employees, nil
+}
+
+// 8. GetEmployeesNameAndID fetches a lightweight list of all active employees (ID and Name only).
+func (s *EmployeeRepo) GetEmployeesNameAndID(ctx context.Context) ([]*models.EmployeeNameID, error) {
+	query := `SELECT id, fname, lname FROM employees WHERE status = 'active' ORDER BY fname ASC;`
+
+	rows, err := s.db.Query(ctx, query)
+	if err != nil {
+		return nil, fmt.Errorf("error getting employee names and ids: %w", err)
+	}
+	defer rows.Close()
+
+	list := []*models.EmployeeNameID{}
+	for rows.Next() {
+		var item models.EmployeeNameID
+		if err := rows.Scan(&item.ID, &item.FirstName, &item.LastName); err != nil {
+			return nil, fmt.Errorf("error scanning employee name/id: %w", err)
+		}
+		list = append(list, &item)
+	}
+
+	if err = rows.Err(); err != nil {
+		return nil, fmt.Errorf("error iterating employee name/id rows: %w", err)
+	}
+
+	return list, nil
 }
 
 // PaginatedEmployeeList returns a paginated list of employees with optional role & status filters.

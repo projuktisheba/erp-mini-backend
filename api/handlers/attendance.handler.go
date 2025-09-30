@@ -7,7 +7,6 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/go-chi/chi/v5"
 	"github.com/projuktisheba/erp-mini-api/internal/dbrepo"
 	"github.com/projuktisheba/erp-mini-api/internal/models"
 	"github.com/projuktisheba/erp-mini-api/internal/utils"
@@ -277,7 +276,7 @@ func (a *AttendanceHandler) GetEmployeeCalendar(w http.ResponseWriter, r *http.R
 
 // GetEmployeeSummary fetches monthly attendance summary for one employee
 func (a *AttendanceHandler) GetEmployeeSummary(w http.ResponseWriter, r *http.Request) {
-	employeeID := chi.URLParam(r, "employeeID")
+	employeeID := r.URL.Query().Get("employee_id")
 	month := r.URL.Query().Get("month")
 
 	if employeeID == "" {

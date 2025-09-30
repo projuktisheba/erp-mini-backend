@@ -64,7 +64,47 @@ func BadRequest(w http.ResponseWriter, err error) {
 	payload.Message = err.Error()
 	_ = WriteJSON(w, http.StatusOK, payload)
 }
+// NotFound sends a 404 JSON response with a standard structure.
+func NotFound(w http.ResponseWriter, message string) {
+	if message == "" {
+		message = "Resource not found"
+	}
 
+	resp := struct {
+		Error   bool   `json:"error"`
+		Status  string `json:"status"`
+		Message string `json:"message"`
+	}{
+		Error:   true,
+		Status:  "not_found",
+		Message: message,
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusNotFound)
+	_ = json.NewEncoder(w).Encode(resp)
+}
+// ServerError sends a 500 JSON response with a standard structure.
+func ServerError(w http.ResponseWriter, err error) {
+	message := "Internal server error"
+	if err != nil && err.Error() != "" {
+		message = err.Error()
+	}
+
+	resp := struct {
+		Error   bool   `json:"error"`
+		Status  string `json:"status"`
+		Message string `json:"message"`
+	}{
+		Error:   true,
+		Status:  "server_error",
+		Message: message,
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusInternalServerError)
+	_ = json.NewEncoder(w).Encode(resp)
+}
 // EnsureDir checks if a directory exists, and creates it if it does not.
 func EnsureDir(dir string) error {
 	return os.MkdirAll(dir, os.ModePerm)
@@ -146,3 +186,4 @@ func NullableTime(t time.Time) any {
 	}
 	return t
 }
+

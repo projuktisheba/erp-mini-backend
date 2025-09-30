@@ -50,7 +50,7 @@ func (h *AuthHandler) Signin(w http.ResponseWriter, r *http.Request) {
 	token, err := utils.GenerateJWT(models.JWT{
 		ID:        user.ID,
 		Name:      user.FirstName + user.LastName,
-		Username:  user.Email,
+		Username:  *user.Email,
 		Role:      user.Role,
 		CreatedAt: user.CreatedAt,
 		UpdatedAt: user.UpdatedAt,

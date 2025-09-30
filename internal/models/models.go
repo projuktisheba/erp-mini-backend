@@ -1,6 +1,8 @@
 package models
 
-import "time"
+import (
+	"time"
+)
 
 const (
 	APPName    = "ERP Mini"
@@ -59,19 +61,45 @@ type Employee struct {
 	Role         string    `json:"role"`   //admin //employee
 	Status       string    `json:"status"` //active //inactive
 	Bio          string    `json:"bio"`
-	Email        string    `json:"email"` //username
+	Email        *string   `json:"email"` //username
 	Password     string    `json:"-"`     // don't expose
-	Mobile       string    `json:"mobile"`
+	Mobile       *string   `json:"mobile"`
 	Country      string    `json:"country"`
 	City         string    `json:"city"`
 	Address      string    `json:"address"`
 	PostalCode   string    `json:"postal_code"`
-	TaxID        string    `json:"tax_id"` //tax_id
+	TaxID        *string   `json:"tax_id"` //tax_id
 	BaseSalary   float64   `json:"base_salary"`
 	OvertimeRate float64   `json:"overtime_rate"`
 	AvatarLink   string    `json:"avatar_link"`
 	CreatedAt    time.Time `json:"created_at"`
 	UpdatedAt    time.Time `json:"updated_at"`
+}
+
+// EmployeeNameID is a lightweight struct for fetching only customer's ID and Name.
+type EmployeeNameID struct {
+	ID        int     `json:"id"`
+	FirstName string  `json:"first_name"`
+	LastName  *string `json:"last_name"`
+}
+
+// Customer represents the customers table
+type Customer struct {
+	ID        int64     `json:"id"`
+	Name      string    `json:"name"`
+	Address   string    `json:"address"`
+	Mobile    *string   `json:"mobile,omitempty"`
+	TaxID     *string   `json:"tax_id,omitempty"`
+	DueAmount float64   `json:"due_amount"`
+	Status    bool      `json:"status"`
+	CreatedAt time.Time `json:"created_at"`
+	UpdatedAt time.Time `json:"updated_at"`
+}
+
+// CustomerNameID is a lightweight struct for fetching only customer's ID and Name.
+type CustomerNameID struct {
+	ID   int64  `json:"id"`
+	Name string `json:"name"`
 }
 
 type Attendance struct {
@@ -105,3 +133,93 @@ type EmployeeCalendar struct {
 	Month        string        `json:"month"`
 	Attendance   []*Attendance `json:"attendance"`
 }
+
+type Product struct {
+	ID                 int64     `json:"id"`
+	ProductCode        string    `json:"product_code"`
+	ProductName        string    `json:"product_name"`
+	ProductDescription string    `json:"product_description"`
+	ProductStatus      bool      `json:"product_status"`
+	MRP                int64     `json:"mrp"`
+	Warranty           int       `json:"warranty"`
+	CategoryID         *int64    `json:"category_id,omitempty"`
+	BrandID            *int64    `json:"brand_id,omitempty"`
+	StockAlertLevel    int16     `json:"stock_alert_level"`
+	CreatedAt          time.Time `json:"created_at"`
+	UpdatedAt          time.Time `json:"updated_at"`
+}
+
+type Order struct {
+	ID                   int64        `json:"id"`
+	MemoNo               string       `json:"memo_no"`
+	OrderDate            time.Time    `json:"order_date"`
+	SalesManID           int64        `json:"sales_man_id"`
+	SalesManName         string       `json:"sales_man_name"`
+	CustomerID           int64        `json:"customer_id"`
+	CustomerName         string       `json:"customer_name"`
+	TotalPayableAmount   float64      `json:"total_payable_amount"`
+	AdvancePaymentAmount float64      `json:"advance_payment_amount"`
+	DueAmount            float64      `json:"due_amount"`
+	PaymentAccountID     *int64       `json:"payment_account_id,omitempty"`
+	Status               string       `json:"status"`
+	DeliveryDate         *time.Time   `json:"delivery_date,omitempty"`
+	DeliveredBy          *int64       `json:"delivered_by,omitempty"`
+	Notes                *string      `json:"notes,omitempty"`
+	CreatedAt            time.Time    `json:"created_at"`
+	UpdatedAt            time.Time    `json:"updated_at"`
+	Items                []*OrderItem `json:"items,omitempty"`
+}
+
+type OrderItem struct {
+	ID         int64   `json:"id"`
+	OrderID    int64   `json:"order_id"`
+	ProductID  int64   `json:"product_id"`
+	Quantity   int     `json:"quantity"`
+	UnitPrice  float64 `json:"unit_price"`
+	TotalPrice float64 `json:"total_price"`
+}
+
+type Account struct {
+	ID             int64     `json:"id"`
+	Name           string    `json:"name"`
+	Type           string    `json:"type"`
+	CurrentBalance float64   `json:"current_balance"`
+	CreatedAt      time.Time `json:"created_at"`
+	UpdatedAt      time.Time `json:"updated_at"`
+}
+type AccountNameID struct {
+	ID   int64  `json:"id"`
+	Name string `json:"name"`
+}
+
+type Transaction struct {
+	ID              int64     `json:"id"`
+	TransactionID   string    `json:"transaction_id"` // optional unique identifier if needed
+	FromID          int64     `json:"from_id"`
+	FromAccountName string    `json:"from_account_name"`
+	FromType        string    `json:"from_type"` // customers, employees, accounts, etc.
+	ToID            int64     `json:"to_id"`
+	ToAccountName   string    `json:"to_account_name"`
+	ToType          string    `json:"to_type"` // customers, employees, accounts, etc.
+	Amount          float64   `json:"amount"`
+	TransactionType string    `json:"transaction_type"` // payment, refund, adjustment, salary
+	CreatedAt       time.Time `json:"created_at"`
+	Notes           string    `json:"notes,omitempty"`
+}
+
+
+// Reports
+type OrderOverview struct {
+	TotalOrders           int64 `json:"total_orders"`
+	PendingOrders         int64 `json:"pending_orders"`
+	CheckoutOrders        int64 `json:"checkout_orders"`
+	CompletedOrders       int64 `json:"completed_orders"`
+	CancelledOrders       int64 `json:"cancelled_orders"`
+	
+	TotalOrdersAmount     int64 `json:"total_orders_amount"`
+	PendingOrdersAmount   int64 `json:"pending_orders_amount"`
+	CheckoutOrdersAmount  int64 `json:"checkout_orders_amount"`
+	CompletedOrdersAmount int64 `json:"completed_orders_amount"`
+	CancelledOrdersAmount int64 `json:"cancelled_orders_amount"`
+}
+

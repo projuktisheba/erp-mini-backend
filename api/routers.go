@@ -36,7 +36,8 @@ func (app *application) routes() http.Handler {
 	})
 
 	mux.Post("/api/v1/login", app.Handlers.Auth.Signin)
-	// --- HR (Employee) Routes ---
+
+	// -------------------- HR(Employee) Routes --------------------
 	mux.Route("/api/v1/hr", func(r chi.Router) {
 		// Get single employee by id, email, or mobile (query param)
 		// Example: GET /api/v1/hr/employee?id=5
@@ -50,6 +51,10 @@ func (app *application) routes() http.Handler {
 		// Get paginated list of employees with optional filters
 		// Example: GET /api/v1/hr/employees?page=1&limit=20&role=admin&status=active
 		r.Get("/employees", app.Handlers.Employee.PaginatedEmployeeList)
+
+		// Get all active employee names and IDs (lightweight)
+		// Example: GET /api/v1/hr/employees/names
+		r.Get("/employees/names", app.Handlers.Employee.GetEmployeesNameAndID)
 
 		// Upload employee profile picture (Form Data: id, profile_picture)
 		// Example: POST /api/v1/hr/profile-picture
@@ -72,6 +77,7 @@ func (app *application) routes() http.Handler {
 		r.Put("/employee/role", app.Handlers.Employee.UpdateEmployeeRole)
 
 	})
+	// -------------------- attendance Routes --------------------
 	mux.Route("/api/v1/hr/attendance", func(r chi.Router) {
 		// Mark or update today's attendance for a single employee
 		// Example: POST /api/v1/hr/attendance/5
@@ -89,13 +95,138 @@ func (app *application) routes() http.Handler {
 		r.Get("/calendar", app.Handlers.Attendance.GetEmployeeCalendar)
 
 		// Get monthly attendance summary (working days, overtime, etc.) for one employee
-		// Example: GET /api/v1/hr/attendance/5/summary?month=2025-09
-		r.Get("/{employeeID}/summary", app.Handlers.Attendance.GetEmployeeSummary)
+		// Example: GET /api/v1/hr/attendance/summary?employee_id=1?month=2025-09
+		r.Get("/summary", app.Handlers.Attendance.GetEmployeeSummary)
 
 		// Get batch attendance summary for multiple employees in a given month or range
 		// Example: GET /api/v1/hr/attendance/batch/summary?month=2025-09
 		// Example: GET /api/v1/hr/attendance/batch/summary?start=2025-09-01&end=2025-09-30
 		r.Get("/batch/summary", app.Handlers.Attendance.GetBatchSummary)
+	})
+	// -------------------- Customer Routes --------------------
+	mux.Route("/api/v1/mis", func(r chi.Router) {
+		// Get single customer by id, mobile, or tax_id (query param)
+		// Example: GET /api/v1/mis/customer?id=5
+		// Example: GET /api/v1/mis/customer?mobile=017xxxxxxxx
+		// Example: GET /api/v1/mis/customer?tax_id=123456789
+		r.Get("/customer", app.Handlers.Customer.GetCustomerByID) // Can extend handler to handle mobile/tax_id query too
+
+		// Add a new customer
+		// Example: POST /api/v1/mis/customer
+		// Body (JSON): { "name", "mobile", "address", "tax_id" }
+		r.Post("/customer", app.Handlers.Customer.AddCustomer)
+
+		// Update general customer details
+		// Example: PUT /api/v1/mis/customer
+		// Body (JSON): { "id", "name", "mobile", "address", "tax_id" }
+		r.Put("/customer", app.Handlers.Customer.UpdateCustomerInfo)
+
+		// Update customer due amount
+		// Example: PUT /api/v1/mis/customer/due
+		// Body (JSON): { "id", "due_amount" }
+		r.Put("/customer/due", app.Handlers.Customer.UpdateCustomerDueAmount)
+
+		// Update customer status (active/inactive)
+		// Example: PUT /api/v1/mis/customer/status
+		// Body (JSON): { "id", "status" }
+		r.Put("/customer/status", app.Handlers.Customer.UpdateCustomerStatus)
+
+		// Get paginated list of customers with optional filters
+		// Example: GET /api/v1/mis/customers?page=1&limit=20&status=active
+		r.Get("/customers", app.Handlers.Customer.GetCustomers) // Use query params: page, limit, status
+
+		// Filter customers by name
+		// Example: GET /api/v1/mis/customers/filter?name=John
+		r.Get("/customers/filter", app.Handlers.Customer.FilterCustomersByName)
+
+		// Get all active customer names and IDs (lightweight)
+		// Example: GET /api/v1/mis/customers/names
+		r.Get("/customers/names", app.Handlers.Customer.GetCustomersNameAndID)
+
+		// Get all customers who have some due
+		// Example: GET /api/v1/mis/customers/with-due
+		r.Get("/customers/with-due", app.Handlers.Customer.GetCustomersWithDueHandler)
+
+	})
+	// -------------------- Product Routes --------------------
+	mux.Route("/api/v1/products", func(r chi.Router) {
+		// Get all products
+		// Example: GET /api/v1/products
+		r.Get("/", app.Handlers.Product.GetProductsHandler)
+	})
+
+	// -------------------- Order Routes --------------------
+	mux.Route("/api/v1/orders", func(r chi.Router) {
+		// Create a new order
+		// Example: POST /api/v1/orders
+		// Body (JSON): { order object with items }
+		r.Post("/", app.Handlers.Order.AddOrder)
+
+		// Update an existing order
+		// Example: PUT /api/v1/orders
+		// Body (JSON): { order object with items, id must exist }
+		r.Put("/", app.Handlers.Order.UpdateOrder)
+
+		// Cancel an order
+		// Example: DELETE /api/v1/orders?id=123
+		r.Delete("/", app.Handlers.Order.CancelOrder)
+
+		// Update order status
+		// Example: PATCH /api/v1/mis/orders/status?id=123
+		// Body (JSON): { "status": "checkout" }
+		r.Patch("/status", app.Handlers.Order.UpdateOrderStatus)
+
+		// Get order details by ID
+		// Example: GET /api/v1/mis/orders?order_id=123
+		r.Get("/", app.Handlers.Order.GetOrderDetailsByID)
+
+		// List orders filtered by customerID and/or salesManID
+		// Example: GET /api/v1/orders/list
+		// Example: GET /api/v1/orders/list?customer_id=1&sales_man_id=2
+		r.Get("/list", app.Handlers.Order.ListOrdersWithFilter)
+
+		// List orders with pagination
+		// Example: GET /api/v1/orders/list/paginated?pageNo=1&pageLength=20
+		// If pageLength=-1, all orders will be returned
+		r.Get("/list/paginated", app.Handlers.Order.ListOrdersPaginatedHandler)
+
+		// List orders filtered by status
+		// Example: GET /api/v1/orders/list/status?status=progress
+		r.Get("/list/status", app.Handlers.Order.ListOrdersByStatusHandler)
+
+		// Get order summary for a specific date range (daily/monthly)
+		// Example: GET /api/v1/mis/orders/summary?start_date=2025-09-01&end_date=2025-09-30
+		r.Get("/summary", app.Handlers.Order.GetOrderSummaryHandler)
+	})
+	// -------------------- Transaction Routes --------------------
+	mux.Route("/api/v1/accounts", func(r chi.Router) {
+		// Get all accounts
+		// Example: GET /api/v1/accounts
+		r.Get("/", app.Handlers.Account.GetAccountsHandler)
+
+		// Get all accounts
+		// Example: GET /api/v1/accounts/names
+		r.Get("/names", app.Handlers.Account.GetAccountNamesHandler)
+
+	})
+	// -------------------- Transaction Routes --------------------
+	mux.Route("/api/v1/transactions", func(r chi.Router) {
+		// Get transaction summary with filters and date range
+		// Example: GET /api/v1/transactions/summary?start_date=2025-09-01&end_date=2025-09-30
+		// Optional filters: from_id, to_id, from_type, to_type, transaction_type
+		r.Get("/summary", app.Handlers.Transaction.GetTransactionSummaryHandler)
+
+		// Paginated transactions list with optional filters
+		// Example: GET /api/v1/transactions/list?pageNo=1&pageLength=20&from_id=5&from_type=customer
+		r.Get("/list", app.Handlers.Transaction.ListTransactionsPaginatedHandler)
+	})
+
+	// -------------------- Report Routes --------------------
+	mux.Route("/api/v1/reports", func(r chi.Router) {
+		// Dashboard summary for orders
+		// Example: GET /api/v1/reports/dashboard/orders/overview?type=month&date=2025-09-01
+		// Note: Acceptable type [daily, weekly, monthly, yearly, all]
+		r.Get("/dashboard/orders/overview", app.Handlers.Report.GetOrderOverView)
 	})
 
 	return mux
