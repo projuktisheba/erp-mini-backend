@@ -10,7 +10,6 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/projuktisheba/erp-mini-api/internal/models"
-	"github.com/projuktisheba/erp-mini-api/internal/utils"
 )
 
 // ============================== Attendance Repository ==============================
@@ -27,12 +26,10 @@ func NewAttendanceRepo(db *pgxpool.Pool) *AttendanceRepo {
 func (a *AttendanceRepo) UpdateTodayAttendance(ctx context.Context, employeeAttendance models.Attendance) error {
 	// Insert or update in DB
 	query := `
-		INSERT INTO attendance (employee_id, work_date, status, check_in, check_out, overtime_hours)
+		INSERT INTO attendance (employee_id, work_date, status, overtime_hours)
 		VALUES ($1, $2, $3, $4, $5, $6)
 		ON CONFLICT (employee_id, work_date)
 		DO UPDATE SET status = EXCLUDED.status,
-					  check_in = EXCLUDED.check_in,
-					  check_out = EXCLUDED.check_out,
 					  overtime_hours = EXCLUDED.overtime_hours,
 					  updated_at = CURRENT_TIMESTAMP;
 	`
@@ -41,8 +38,6 @@ func (a *AttendanceRepo) UpdateTodayAttendance(ctx context.Context, employeeAtte
 		employeeAttendance.EmployeeID,
 		employeeAttendance.WorkDate,
 		employeeAttendance.Status,
-		employeeAttendance.CheckIn,
-		employeeAttendance.CheckOut,
 		employeeAttendance.OvertimeHours,
 	)
 
@@ -58,15 +53,13 @@ func (a *AttendanceRepo) BatchUpdateTodayAttendance(ctx context.Context, entries
 	batch := &pgx.Batch{}
 	for _, e := range entries {
 		batch.Queue(`
-			INSERT INTO attendance (employee_id, work_date, status, check_in, check_out, overtime_hours)
+			INSERT INTO attendance (employee_id, work_date, status, overtime_hours)
 			VALUES ($1, $2, $3, $4, $5, $6)
 			ON CONFLICT (employee_id, work_date)
 			DO UPDATE SET status = EXCLUDED.status,
-						  check_in = EXCLUDED.check_in,
-						  check_out = EXCLUDED.check_out,
 						  overtime_hours = EXCLUDED.overtime_hours,
 						  updated_at = CURRENT_TIMESTAMP;
-		`, e.EmployeeID, e.WorkDate, e.Status, utils.NullableTime(e.CheckIn), utils.NullableTime(e.CheckOut), e.OvertimeHours)
+		`, e.EmployeeID, e.WorkDate, e.Status, e.OvertimeHours)
 	}
 
 	br := a.db.SendBatch(ctx, batch)
@@ -103,7 +96,7 @@ func (a *AttendanceRepo) GetEmployeeCalendar(ctx context.Context, employeeIDStr,
 
 		query = `
 			SELECT a.id, a.employee_id, e.fname || ' ' || e.lname AS employee_name,
-				   a.work_date, a.status, a.check_in, a.check_out, a.overtime_hours,
+				   a.work_date, a.status, a.overtime_hours,
 				   a.created_at, a.updated_at
 			FROM attendance a
 			JOIN employees e ON e.id = a.employee_id
@@ -129,7 +122,7 @@ func (a *AttendanceRepo) GetEmployeeCalendar(ctx context.Context, employeeIDStr,
 
 		query = `
 			SELECT a.id, a.employee_id, e.fname || ' ' || e.lname AS employee_name,
-				   a.work_date, a.status, a.check_in, a.check_out, a.overtime_hours,
+				   a.work_date, a.status, a.overtime_hours,
 				   a.created_at, a.updated_at
 			FROM attendance a
 			JOIN employees e ON e.id = a.employee_id
@@ -145,7 +138,7 @@ func (a *AttendanceRepo) GetEmployeeCalendar(ctx context.Context, employeeIDStr,
 	} else {
 		query = `
 			SELECT a.id, a.employee_id, e.fname || ' ' || e.lname AS employee_name,
-				   a.work_date, a.status, a.check_in, a.check_out, a.overtime_hours,
+				   a.work_date, a.status, a.overtime_hours,
 				   a.created_at, a.updated_at
 			FROM attendance a
 			JOIN employees e ON e.id = a.employee_id
@@ -171,19 +164,13 @@ func (a *AttendanceRepo) GetEmployeeCalendar(ctx context.Context, employeeIDStr,
 
 		err = rows.Scan(
 			&a.ID, &a.EmployeeID, &employeeName,
-			&a.WorkDate, &a.Status, &a.CheckIn, &a.CheckOut, &a.OvertimeHours,
+			&a.WorkDate, &a.Status, &a.OvertimeHours,
 			&a.CreatedAt, &a.UpdatedAt,
 		)
 		if err != nil {
 			return nil, err
 		}
 		a.WorkDateStr = a.WorkDate.Format("2006-01-02")
-		if !a.CheckIn.IsZero() {
-			a.CheckInStr = a.CheckIn.Format("15:04")
-		}
-		if !a.CheckOut.IsZero() {
-			a.CheckOutStr = a.CheckOut.Format("15:04")
-		}
 		calendar.EmployeeID = a.EmployeeID
 		calendar.EmployeeName = employeeName
 		calendar.Attendance = append(calendar.Attendance, &a)
