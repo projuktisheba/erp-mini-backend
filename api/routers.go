@@ -15,12 +15,13 @@ func (app *application) routes() http.Handler {
 	// --- Global middlewares ---
 	mux.Use(cors.Handler(cors.Options{
 		AllowedOrigins:   []string{"*"},
-		AllowedMethods:   []string{"GET", "POST", "PUT", "DELETE", "OPTIONS"},
+		AllowedMethods:   []string{"GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"},
 		AllowedHeaders:   []string{"Accept", "Authorization", "Content-Type", "X-CSRF-Token"},
 		AllowCredentials: false,
 		MaxAge:           300,
 	}))
-	mux.Use(app.Logger) // Simple logger
+	mux.Use(app.Logger) // logger
+	// mux.Use(app.AuthUser) // Authenticate User
 
 	// --- Static file serving for images ---
 	// Serves files under ./data/images → accessible via /images/*
@@ -37,11 +38,14 @@ func (app *application) routes() http.Handler {
 
 	mux.Post("/api/v1/login", app.Handlers.Auth.Signin)
 
+	//Branches List
+	
 	// -------------------- HR(Employee) Routes --------------------
 	mux.Route("/api/v1/hr", func(r chi.Router) {
+		// r.Use(app.RequireRole(RoleManager))
 		// Get single employee by id, email, or mobile (query param)
 		// Example: GET /api/v1/hr/employee?id=5
-		r.Get("/employee", app.Handlers.Employee.GetEmployee)
+		r.Get("/employee", app.Handlers.Employee.GetEmployeeByID)
 
 		// Add a new employee
 		// Example: POST /api/v1/hr/employee
@@ -49,7 +53,8 @@ func (app *application) routes() http.Handler {
 		r.Post("/employee", app.Handlers.Employee.AddEmployee)
 
 		// Get paginated list of employees with optional filters
-		// Example: GET /api/v1/hr/employees?page=1&limit=20&role=admin&status=active
+		//allowed-role: 'chairman', 'manager', 'salesperson', 'worker'
+		// Example: GET /api/v1/hr/employees?page=1&limit=20&role=salesperson&status=active
 		r.Get("/employees", app.Handlers.Employee.PaginatedEmployeeList)
 
 		// Get all active employee names and IDs (lightweight)
@@ -79,9 +84,10 @@ func (app *application) routes() http.Handler {
 	})
 	// -------------------- attendance Routes --------------------
 	mux.Route("/api/v1/hr/attendance", func(r chi.Router) {
+		// r.Use(app.RequireRole(RoleManager))
 		// Mark or update today's attendance for a single employee
 		// Example: POST /api/v1/hr/attendance/5
-		// Body (JSON): { id:1 checkin: "09:00", checkout: "18:00", overtime_hours: 2 }
+		// Body (JSON): { id:1, work_date:2025-10-1 overtime_hours: 2 }
 		r.Post("/present/single", app.Handlers.Attendance.MarkEmployeePresent)
 
 		// Batch update today's attendance for multiple employees
@@ -150,6 +156,7 @@ func (app *application) routes() http.Handler {
 	})
 	// -------------------- Product Routes --------------------
 	mux.Route("/api/v1/products", func(r chi.Router) {
+		// r.Use(app.RequireRole(RoleManager))
 		// Get all products
 		// Example: GET /api/v1/products
 		r.Get("/", app.Handlers.Product.GetProductsHandler)
@@ -157,6 +164,7 @@ func (app *application) routes() http.Handler {
 
 	// -------------------- Order Routes --------------------
 	mux.Route("/api/v1/orders", func(r chi.Router) {
+		// r.Use(app.RequireRole(RoleManager))
 		// Create a new order
 		// Example: POST /api/v1/orders
 		// Body (JSON): { order object with items }
@@ -168,16 +176,21 @@ func (app *application) routes() http.Handler {
 		r.Put("/", app.Handlers.Order.UpdateOrder)
 
 		// Cancel an order
-		// Example: DELETE /api/v1/orders?id=123
+		// Example: DELETE /api/v1/orders?order_id=123
 		r.Delete("/", app.Handlers.Order.CancelOrder)
 
-		// Update order status
-		// Example: PATCH /api/v1/mis/orders/status?id=123
-		// Body (JSON): { "status": "checkout" }
-		r.Patch("/status", app.Handlers.Order.UpdateOrderStatus)
+		// Update order status to checkout
+		// Example: PATCH /api/v1//orders/checkout?order_id=123
+
+		r.Patch("/checkout", app.Handlers.Order.CheckoutOrder)
+
+		// Update order status and payment amount from customer as mark the order as delivered
+		// Example: PATCH /api/v1/orders/delivery
+		// request body :{order_id, paid_amount}
+		r.Patch("/delivery", app.Handlers.Order.OrderDelivery)
 
 		// Get order details by ID
-		// Example: GET /api/v1/mis/orders?order_id=123
+		// Example: GET /api/v1/orders?order_id=12
 		r.Get("/", app.Handlers.Order.GetOrderDetailsByID)
 
 		// List orders filtered by customerID and/or salesManID
@@ -185,9 +198,13 @@ func (app *application) routes() http.Handler {
 		// Example: GET /api/v1/orders/list?customer_id=1&sales_man_id=2
 		r.Get("/list", app.Handlers.Order.ListOrdersWithFilter)
 
-		// List orders with pagination
+		// List orders with pagination, optional status filter, and sorting by created_at.
 		// Example: GET /api/v1/orders/list/paginated?pageNo=1&pageLength=20
-		// If pageLength=-1, all orders will be returned
+		// Example with status filter: GET /api/v1/orders/list/paginated?pageNo=1&pageLength=20&status=checkout
+		// Example with sorting ascending: GET /api/v1/orders/list/paginated?pageNo=1&pageLength=20&sort_by_date=asc
+		// Example with status filter + ascending sort:
+		// GET /api/v1/orders/list/paginated?pageNo=1&pageLength=20&status=pending&sort_by_date=asc
+		// If pageLength=-1, all orders will be returned without pagination
 		r.Get("/list/paginated", app.Handlers.Order.ListOrdersPaginatedHandler)
 
 		// List orders filtered by status
@@ -200,6 +217,7 @@ func (app *application) routes() http.Handler {
 	})
 	// -------------------- Transaction Routes --------------------
 	mux.Route("/api/v1/accounts", func(r chi.Router) {
+		// r.Use(app.RequireRole(RoleManager))
 		// Get all accounts
 		// Example: GET /api/v1/accounts
 		r.Get("/", app.Handlers.Account.GetAccountsHandler)
@@ -211,6 +229,7 @@ func (app *application) routes() http.Handler {
 	})
 	// -------------------- Transaction Routes --------------------
 	mux.Route("/api/v1/transactions", func(r chi.Router) {
+		// r.Use(app.RequireRole(RoleManager))
 		// Get transaction summary with filters and date range
 		// Example: GET /api/v1/transactions/summary?start_date=2025-09-01&end_date=2025-09-30
 		// Optional filters: from_id, to_id, from_type, to_type, transaction_type
@@ -223,6 +242,7 @@ func (app *application) routes() http.Handler {
 
 	// -------------------- Report Routes --------------------
 	mux.Route("/api/v1/reports", func(r chi.Router) {
+		// r.Use(app.RequireRole(RoleAdmin))
 		// Dashboard summary for orders
 		// Example: GET /api/v1/reports/dashboard/orders/overview?type=month&date=2025-09-01
 		// Note: Acceptable type [daily, weekly, monthly, yearly, all]

@@ -24,7 +24,7 @@ func Load() (models.Config, error) {
 		if err != nil {
 			return cfg, err
 		}
-		cfg.Port = port
+		cfg.Port = int64(port)
 	} else {
 		cfg.Port = 8080 // Default port
 	}

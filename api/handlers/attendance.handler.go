@@ -52,57 +52,7 @@ func (a *AttendanceHandler) MarkEmployeePresent(w http.ResponseWriter, r *http.R
 		utils.BadRequest(w, fmt.Errorf("invalid work_date format for employee %d, expected YYYY-MM-DD", req.EmployeeID))
 		return
 	}
-
-	// Parse check-in time (24-hour)
-	checkInTime, err := time.Parse("15:04", req.CheckInStr)
-	if err != nil {
-		a.errorLog.Println("ERROR_03_UpdateTodayAttendance: Invalid CheckInStr:", req.CheckInStr)
-		utils.BadRequest(w, errors.New("invalid check-in time format, expected HH:MM (24h)"))
-		return
-	}
-	checkInTime = time.Date(workDate.Year(), workDate.Month(), workDate.Day(),
-		checkInTime.Hour(), checkInTime.Minute(), 0, 0, time.UTC)
-
-	// Parse check-out time (24-hour)
-	checkOutTime, err := time.Parse("15:04", req.CheckOutStr)
-	if err != nil {
-		a.errorLog.Println("ERROR_04_UpdateTodayAttendance: Invalid CheckOutStr:", req.CheckOutStr)
-		utils.BadRequest(w, errors.New("invalid check-out time format, expected HH:MM (24h)"))
-		return
-	}
-	checkOutTime = time.Date(workDate.Year(), workDate.Month(), workDate.Day(),
-		checkOutTime.Hour(), checkOutTime.Minute(), 0, 0, time.UTC)
-
-	// Handle overnight shift
-	if checkOutTime.Before(checkInTime) {
-		checkOutTime = checkOutTime.Add(24 * time.Hour)
-	}
-
-	req.CheckIn = checkInTime
-	req.CheckOut = checkOutTime
 	req.WorkDate = workDate
-	req.Status = "Present"
-
-	// Calculate overtime if duration > 0
-	calculatedOvertime := 0
-	if !checkInTime.Equal(checkOutTime) {
-		duration := checkOutTime.Sub(checkInTime)
-		calculatedOvertime = max(int(duration.Hours())-8, 0)
-
-		// Validate user-provided overtime
-		if req.OvertimeHours != calculatedOvertime {
-			errMsg := fmt.Sprintf(
-				"provided overtime_hours (%d) does not match calculated overtime (%d)",
-				req.OvertimeHours, calculatedOvertime,
-			)
-			a.errorLog.Println("ERROR_05_UpdateTodayAttendance:", errMsg)
-			utils.BadRequest(w, errors.New(errMsg))
-			return
-		}
-	}
-
-	// Assign validated/corrected overtime
-	req.OvertimeHours = calculatedOvertime
 
 	// Update DB
 	err = a.DB.UpdateTodayAttendance(r.Context(), req)
@@ -117,7 +67,7 @@ func (a *AttendanceHandler) MarkEmployeePresent(w http.ResponseWriter, r *http.R
 		Error         bool   `json:"error"`
 		Status        string `json:"status"`
 		Message       string `json:"message"`
-		OvertimeHours int    `json:"overtime_hours"`
+		OvertimeHours int64  `json:"overtime_hours"`
 	}{
 		Error:         false,
 		Status:        "success",
@@ -162,62 +112,10 @@ func (a *AttendanceHandler) MarkEmployeesPresentBatch(w http.ResponseWriter, r *
 			return
 		}
 
-		// Parse check-in
-		checkInTime, err := time.Parse("15:04", att.CheckInStr)
-		if err != nil {
-			a.errorLog.Printf("ERROR_04_BatchUpdateTodayAttendance: Invalid CheckInStr %q for employee %d", att.CheckInStr, att.EmployeeID)
-			utils.BadRequest(w, fmt.Errorf("invalid check-in time format for employee %d, expected HH:MM (24h)", att.EmployeeID))
-			return
-		}
-		checkInTime = time.Date(workDate.Year(), workDate.Month(), workDate.Day(),
-			checkInTime.Hour(), checkInTime.Minute(), 0, 0, time.UTC)
-
-		// Parse check-out
-		checkOutTime, err := time.Parse("15:04", att.CheckOutStr)
-		if err != nil {
-			a.errorLog.Printf("ERROR_05_BatchUpdateTodayAttendance: Invalid CheckOutStr %q for employee %d", att.CheckOutStr, att.EmployeeID)
-			utils.BadRequest(w, fmt.Errorf("invalid check-out time format for employee %d, expected HH:MM (24h)", att.EmployeeID))
-			return
-		}
-		checkOutTime = time.Date(workDate.Year(), workDate.Month(), workDate.Day(),
-			checkOutTime.Hour(), checkOutTime.Minute(), 0, 0, time.UTC)
-
-		// Handle overnight shift
-		if checkOutTime.Before(checkInTime) {
-			checkOutTime = checkOutTime.Add(24 * time.Hour)
-		}
-
-		// Assign times
-		att.CheckIn = checkInTime
-		att.CheckOut = checkOutTime
 		att.WorkDate = workDate
 
 		att.Status = "Present"
-
-		// Calculate overtime
-		var calculatedOvertime int
-		if !checkInTime.Equal(checkOutTime) {
-			duration := checkOutTime.Sub(checkInTime)
-			calculatedOvertime = max(int(duration.Hours())-8, 0)
-
-			// Validate user-provided overtime
-			if att.OvertimeHours != calculatedOvertime {
-				errMsg := fmt.Sprintf("employee %d: provided overtime_hours (%d) does not match calculated overtime (%d)",
-					att.EmployeeID, att.OvertimeHours, calculatedOvertime)
-				a.errorLog.Println("ERROR_06_BatchUpdateTodayAttendance:", errMsg)
-				utils.BadRequest(w, errors.New(errMsg))
-				return
-			}
-		} else {
-			// Zero duration = no overtime
-			calculatedOvertime = 0
-			att.OvertimeHours = 0
-		}
-
-		// Set validated overtime
-		att.OvertimeHours = calculatedOvertime
 	}
-
 	// Save all records
 	err = a.DB.BatchUpdateTodayAttendance(r.Context(), req)
 	if err != nil {

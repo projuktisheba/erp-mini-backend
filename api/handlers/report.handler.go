@@ -67,5 +67,5 @@ func (rp *ReportHandler) GetOrderOverView(w http.ResponseWriter, r *http.Request
 	resp.Error = true
 	resp.Message = "Success"
 	resp.OrderOverview = summary
-	utils.WriteJSON(w, http.StatusBadRequest, resp)
+	utils.WriteJSON(w, http.StatusOK, resp)
 }

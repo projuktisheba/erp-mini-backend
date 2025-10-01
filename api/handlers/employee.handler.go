@@ -18,6 +18,14 @@ import (
 	"github.com/projuktisheba/erp-mini-api/internal/utils"
 )
 
+var RoleMap = map[string]bool{
+	"":            true,
+	"chairman":    true,
+	"manager":     true,
+	"salesperson": true,
+	"worker":      true,
+}
+
 type EmployeeHandler struct {
 	DB       *dbrepo.EmployeeRepo
 	infoLog  *log.Logger
@@ -44,7 +52,9 @@ func (e *EmployeeHandler) AddEmployee(w http.ResponseWriter, r *http.Request) {
 	// Hash a password
 	hashed, err := utils.HashPassword(employeeDetails.Password)
 	if err != nil {
-		log.Fatal(err)
+		e.errorLog.Println("ERROR_01_AddEmployee", err)
+		utils.ServerError(w, errors.New("Unable generate the hash password"))
+		return
 	}
 	employeeDetails.Password = hashed
 
@@ -64,25 +74,22 @@ func (e *EmployeeHandler) AddEmployee(w http.ResponseWriter, r *http.Request) {
 	resp.Error = false
 	resp.Message = "Employee added successfully"
 	resp.Employee = &employeeDetails
-
-	utils.WriteJSON(w, 200, resp)
-
 	utils.WriteJSON(w, http.StatusCreated, resp)
 }
-func (e *EmployeeHandler) GetEmployee(w http.ResponseWriter, r *http.Request) {
+func (e *EmployeeHandler) GetEmployeeByID(w http.ResponseWriter, r *http.Request) {
 	idParam := strings.TrimSpace(r.URL.Query().Get("id"))
 	if idParam == "" {
 		e.errorLog.Println("ERROR_01_GetEmployee: Empty user id")
 		utils.BadRequest(w, errors.New("ERROR_01_GetEmployee: Empty user id"))
 		return
 	}
-	id, err := strconv.Atoi(idParam)
+	id, err := strconv.ParseInt(idParam, 10, 64)
 	if err != nil {
 		e.errorLog.Println("ERROR_02_GetEmployee: Invalid user id")
 		utils.BadRequest(w, err)
 		return
 	}
-	employee, err := e.DB.GetEmployee(r.Context(), id)
+	employee, err := e.DB.GetEmployeeByID(r.Context(), id)
 	if err != nil {
 		e.errorLog.Println("ERROR_03_GetEmployee: ", err)
 		utils.BadRequest(w, err)
@@ -100,16 +107,24 @@ func (e *EmployeeHandler) GetEmployee(w http.ResponseWriter, r *http.Request) {
 
 	utils.WriteJSON(w, 200, resp)
 }
-func (h *EmployeeHandler) GetEmployeesNameAndID(w http.ResponseWriter, r *http.Request) {
-	employees, err := h.DB.GetEmployeesNameAndID(r.Context())
+func (e *EmployeeHandler) GetEmployeesNameAndID(w http.ResponseWriter, r *http.Request) {
+	//TODO: extract branch id from url
+	employeeRole := strings.TrimSpace(r.URL.Query().Get("role"))
+
+	if _, found := RoleMap[employeeRole]; !found {
+		e.errorLog.Println("ERROR_01_GetEmployeesNameAndID: Invalid role, allowed-role:[chairman, manager, salesperson, worker]")
+		utils.BadRequest(w, errors.New("Please provide correct role, allowed-role:[chairman, manager, salesperson, worker]"))
+		return
+	}
+	employees, err := e.DB.GetEmployeesNameAndIDByBranchAndRole(r.Context(), 1, employeeRole)
 	var resp struct {
 		Error     bool                     `json:"error"`
 		Status    string                   `json:"status"`
 		Message   string                   `json:"message"`
 		Employees []*models.EmployeeNameID `json:"employees"`
 	}
-	if err != nil {
-		h.errorLog.Println("ERROR_01_GetEmployeesNameAndID:", err)
+	if err != nil || len(employees) == 0 {
+		e.errorLog.Println("ERROR_02_GetEmployeesNameAndID:", err)
 		resp.Error = true
 		resp.Status = "Empty"
 		resp.Message = "No employees found"
@@ -117,12 +132,6 @@ func (h *EmployeeHandler) GetEmployeesNameAndID(w http.ResponseWriter, r *http.R
 		return
 	}
 
-	if len(employees) == 0 {
-		utils.NotFound(w, "No employees found")
-		return
-	}
-
-	
 	resp.Error = false
 	resp.Status = "success"
 	resp.Message = "Employee Names and IDs fetched successfully"
@@ -130,6 +139,7 @@ func (h *EmployeeHandler) GetEmployeesNameAndID(w http.ResponseWriter, r *http.R
 
 	utils.WriteJSON(w, http.StatusOK, resp)
 }
+
 // UpdateEmployee updates general employee details
 func (e *EmployeeHandler) UpdateEmployee(w http.ResponseWriter, r *http.Request) {
 	var employeeDetails models.Employee
@@ -248,15 +258,19 @@ func (e *EmployeeHandler) UpdateEmployeeRole(w http.ResponseWriter, r *http.Requ
 // PaginatedEmployeeList handles fetching a paginated, filtered list of employees.
 // Supports query params: page, limit, role, status
 func (e *EmployeeHandler) PaginatedEmployeeList(w http.ResponseWriter, r *http.Request) {
-	// Extract pagination params
+
+	//TODO: extract branch id from url
+	branchParam := ""
+	// Extract query params
 	pageParam := strings.TrimSpace(r.URL.Query().Get("page"))
 	limitParam := strings.TrimSpace(r.URL.Query().Get("limit"))
 	roleFilter := strings.TrimSpace(r.URL.Query().Get("role"))
 	statusFilter := strings.TrimSpace(r.URL.Query().Get("status"))
 
 	// Defaults
-	page := 1
-	limit := 10
+	page := 0 // 0 means list all
+	limit := 0
+	branchID := int64(1)
 
 	// Parse page param
 	if pageParam != "" {
@@ -280,8 +294,35 @@ func (e *EmployeeHandler) PaginatedEmployeeList(w http.ResponseWriter, r *http.R
 		}
 	}
 
+	// Parse branch_id param
+	if branchParam != "" {
+		if bID, err := strconv.ParseInt(branchParam, 10, 64); err == nil && bID > 0 {
+			branchID = bID
+		} else {
+			e.errorLog.Println("ERROR_04_PaginatedEmployeeList: Invalid branch_id")
+			utils.BadRequest(w, errors.New("ERROR_04_PaginatedEmployeeList: Invalid branch_id"))
+			return
+		}
+	}
+	// Check role param
+	if _, found := RoleMap[roleFilter]; !found {
+		e.errorLog.Println("ERROR_01_GetEmployeesNameAndID: Invalid role, allowed-role:[chairman, manager, salesperson, worker]")
+		utils.BadRequest(w, errors.New("Please provide correct role, allowed-role:[chairman, manager, salesperson, worker]"))
+		return
+	}
+
+	// Set default sorting
+	sortBy := strings.TrimSpace(r.URL.Query().Get("sort_by"))
+	if sortBy == "" {
+		sortBy = "id"
+	}
+	sortOrder := strings.ToUpper(strings.TrimSpace(r.URL.Query().Get("sort_order")))
+	if sortOrder != "ASC" && sortOrder != "DESC" {
+		sortOrder = "ASC"
+	}
+
 	// Fetch filtered employees from DB
-	employees, total, err := e.DB.PaginatedEmployeeList(r.Context(), page, limit, roleFilter, statusFilter)
+	employees, total, err := e.DB.PaginatedEmployeeList(r.Context(), page, limit, branchID, roleFilter, statusFilter, sortBy, sortOrder)
 	if err != nil {
 		e.errorLog.Println("ERROR_03_PaginatedEmployeeList: ", err)
 		utils.BadRequest(w, err)
@@ -289,7 +330,13 @@ func (e *EmployeeHandler) PaginatedEmployeeList(w http.ResponseWriter, r *http.R
 	}
 
 	// Calculate pagination
-	totalPages := (total + limit - 1) / limit
+	totalPages := 1
+	if limit > 0 {
+		totalPages = (total + limit - 1) / limit
+	} else {
+		page = 1
+		limit = total
+	}
 
 	// Build response
 	var resp struct {
@@ -300,6 +347,7 @@ func (e *EmployeeHandler) PaginatedEmployeeList(w http.ResponseWriter, r *http.R
 		Limit      int                `json:"limit"`
 		Total      int                `json:"total"`
 		TotalPages int                `json:"total_pages"`
+		BranchID   int64              `json:"branch_id,omitempty"`
 		Role       string             `json:"role,omitempty"`
 		StatusF    string             `json:"status_filter,omitempty"`
 		Employees  []*models.Employee `json:"employees"`
@@ -312,6 +360,7 @@ func (e *EmployeeHandler) PaginatedEmployeeList(w http.ResponseWriter, r *http.R
 	resp.Limit = limit
 	resp.Total = total
 	resp.TotalPages = totalPages
+	resp.BranchID = branchID
 	resp.Role = roleFilter
 	resp.StatusF = statusFilter
 	resp.Employees = employees

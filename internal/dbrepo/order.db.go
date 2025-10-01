@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"strconv"
+	"strings"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/projuktisheba/erp-mini-api/internal/models"
@@ -263,78 +264,8 @@ func (r *OrderRepo) UpdateOrder(ctx context.Context, newOrder *models.Order) err
 	return nil
 }
 
-// GetOrderDetailsByID fetches an order and its items by order ID
-func (r *OrderRepo) GetOrderDetailsByID(ctx context.Context, orderID int64) (*models.Order, error) {
-	// Step 1: Fetch order with customer and employee names
-	var order models.Order
-	var customerName, employeeName string
-
-	err := r.db.QueryRow(ctx, `
-        SELECT 
-            o.id, o.memo_no, o.order_date, o.sales_man_id, o.customer_id,
-            o.total_payable_amount, o.advance_payment_amount, o.due_amount,
-            o.payment_account_id, o.status, o.delivery_date, o.delivered_by, o.notes,
-            o.created_at, o.updated_at,
-            c.name AS customer_name,
-            e.fname || ' ' || e.lname AS employee_name
-        FROM orders o
-        LEFT JOIN customers c ON o.customer_id = c.id
-        LEFT JOIN employees e ON o.sales_man_id = e.id
-        WHERE o.id = $1
-    `, orderID).Scan(
-		&order.ID,
-		&order.MemoNo,
-		&order.OrderDate,
-		&order.SalesManID,
-		&order.CustomerID,
-		&order.TotalPayableAmount,
-		&order.AdvancePaymentAmount,
-		&order.DueAmount,
-		&order.PaymentAccountID,
-		&order.Status,
-		&order.DeliveryDate,
-		&order.DeliveredBy,
-		&order.Notes,
-		&order.CreatedAt,
-		&order.UpdatedAt,
-		&customerName,
-		&employeeName,
-	)
-	if err != nil {
-		return nil, fmt.Errorf("fetch order: %w", err)
-	}
-
-	order.CustomerName = customerName
-	order.SalesManName = employeeName
-
-	// Step 2: Fetch order items
-	rows, err := r.db.Query(ctx, `
-        SELECT id, product_id, quantity, unit_price
-        FROM order_items
-        WHERE order_id=$1
-    `, orderID)
-	if err != nil {
-		return nil, fmt.Errorf("fetch order items: %w", err)
-	}
-	defer rows.Close()
-
-	items := []*models.OrderItem{}
-	for rows.Next() {
-		var it models.OrderItem
-		if err := rows.Scan(&it.ID, &it.ProductID, &it.Quantity, &it.UnitPrice); err != nil {
-			return nil, fmt.Errorf("scan order item: %w", err)
-		}
-		it.TotalPrice = it.UnitPrice * float64(it.Quantity)
-		it.OrderID = orderID
-		items = append(items, &it)
-	}
-	order.Items = items
-
-	return &order, nil
-}
-
 // UpdateOrderStatus updates the status of an order by id
-func (r *OrderRepo) UpdateOrderStatus(ctx context.Context, orderID int64, newStatus string) error {
+func (r *OrderRepo) CheckoutOrder(ctx context.Context, orderID int64, newStatus string) error {
 	tx, err := r.db.Begin(ctx)
 	if err != nil {
 		return fmt.Errorf("begin tx: %w", err)
@@ -429,10 +360,14 @@ func (r *OrderRepo) CancelOrder(ctx context.Context, orderID int64) error {
 		}
 	}
 
-	// --- Step 4: Delete the order (cascade deletes order_items) ---
-	res, err := tx.Exec(ctx, `DELETE FROM orders WHERE id=$1`, orderID)
+	// --- Step 4: Update order status to 'cancelled' instead of deleting ---
+	res, err := tx.Exec(ctx, `
+        UPDATE orders
+        SET status='cancelled', updated_at=CURRENT_TIMESTAMP
+        WHERE id=$1
+    `, orderID)
 	if err != nil {
-		return fmt.Errorf("delete order: %w", err)
+		return fmt.Errorf("update order status: %w", err)
 	}
 	if res.RowsAffected() == 0 {
 		return fmt.Errorf("order id %d not found", orderID)
@@ -507,6 +442,80 @@ func (r *OrderRepo) ConfirmDelivery(ctx context.Context, orderID int64, delivere
 	}
 
 	return tx.Commit(ctx)
+}
+
+// GetOrderDetailsByID fetches an order and its items by order ID
+func (r *OrderRepo) GetOrderDetailsByID(ctx context.Context, orderID int64) (*models.Order, error) {
+	// Step 1: Fetch order with customer and employee names
+	var order models.Order
+	var customerName, employeeName string
+
+	err := r.db.QueryRow(ctx, `
+        SELECT 
+            o.id, o.memo_no, o.order_date, o.sales_man_id, o.customer_id,
+            o.total_payable_amount, o.advance_payment_amount, o.due_amount,
+            o.payment_account_id, o.status, o.delivery_date, o.delivered_by, o.notes,
+            o.created_at, o.updated_at,
+            c.name AS customer_name,
+            e.fname || ' ' || e.lname AS employee_name
+        FROM orders o
+        LEFT JOIN customers c ON o.customer_id = c.id
+        LEFT JOIN employees e ON o.sales_man_id = e.id
+        WHERE o.id = $1
+    `, orderID).Scan(
+		&order.ID,
+		&order.MemoNo,
+		&order.OrderDate,
+		&order.SalesManID,
+		&order.CustomerID,
+		&order.TotalPayableAmount,
+		&order.AdvancePaymentAmount,
+		&order.DueAmount,
+		&order.PaymentAccountID,
+		&order.Status,
+		&order.DeliveryDate,
+		&order.DeliveredBy,
+		&order.Notes,
+		&order.CreatedAt,
+		&order.UpdatedAt,
+		&customerName,
+		&employeeName,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("fetch order: %w", err)
+	}
+
+	order.CustomerName = customerName
+	order.SalesManName = employeeName
+
+	// Step 2: Fetch order items with product names
+	rows, err := r.db.Query(ctx, `
+        SELECT 
+            oi.id, oi.product_id, p.product_name AS product_name, oi.quantity, oi.unit_price
+        FROM order_items oi
+        LEFT JOIN products p ON oi.product_id = p.id
+        WHERE oi.order_id = $1
+    `, orderID)
+	if err != nil {
+		return nil, fmt.Errorf("fetch order items: %w", err)
+	}
+	defer rows.Close()
+
+	items := []*models.OrderItem{}
+	for rows.Next() {
+		var it models.OrderItem
+		var productName string
+		if err := rows.Scan(&it.ID, &it.ProductID, &productName, &it.Quantity, &it.UnitPrice); err != nil {
+			return nil, fmt.Errorf("scan order item: %w", err)
+		}
+		it.TotalPrice = it.UnitPrice * float64(it.Quantity)
+		it.OrderID = orderID
+		it.ProductName = productName
+		items = append(items, &it)
+	}
+	order.Items = items
+
+	return &order, nil
 }
 
 // ListOrdersWithItems fetches a list of orders filtered by customer_id or sales_man_id
@@ -593,7 +602,7 @@ func (r *OrderRepo) ListOrdersWithItems(ctx context.Context, customerID, salesMa
 	return orders, nil
 }
 
-func (r *OrderRepo) ListOrdersPaginated(ctx context.Context, pageNo, pageLength int) ([]*models.Order, error) {
+func (r *OrderRepo) ListOrdersPaginated(ctx context.Context, pageNo, pageLength int, status, sortByDate string) ([]*models.Order, error) {
 	query := `
 		SELECT 
 		    o.id, o.memo_no, o.order_date, o.sales_man_id, o.customer_id, 
@@ -604,13 +613,30 @@ func (r *OrderRepo) ListOrdersPaginated(ctx context.Context, pageNo, pageLength 
 		FROM orders o
 		LEFT JOIN customers c ON o.customer_id = c.id
 		LEFT JOIN employees e ON o.sales_man_id = e.id
-		ORDER BY o.order_date DESC
+		WHERE 1=1
 	`
 
 	args := []interface{}{}
+	argIdx := 1
+
+	// --- Status filter ---
+	if status != "" {
+		query += fmt.Sprintf(" AND o.status = $%d", argIdx)
+		args = append(args, status)
+		argIdx++
+	}
+
+	// --- Sorting ---
+	sortOrder := "DESC"
+	if strings.ToLower(sortByDate) == "asc" {
+		sortOrder = "ASC"
+	}
+	query += " ORDER BY o.created_at " + sortOrder
+
+	// --- Pagination ---
 	if pageLength != -1 {
 		offset := (pageNo - 1) * pageLength
-		query += ` LIMIT $1 OFFSET $2`
+		query += fmt.Sprintf(" LIMIT $%d OFFSET $%d", argIdx, argIdx+1)
 		args = append(args, pageLength, offset)
 	}
 

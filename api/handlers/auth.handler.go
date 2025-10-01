@@ -49,8 +49,8 @@ func (h *AuthHandler) Signin(w http.ResponseWriter, r *http.Request) {
 	// Generate JWT
 	token, err := utils.GenerateJWT(models.JWT{
 		ID:        user.ID,
-		Name:      user.FirstName + user.LastName,
-		Username:  *user.Email,
+		Name:      user.Name,
+		Username:  user.Email,
 		Role:      user.Role,
 		CreatedAt: user.CreatedAt,
 		UpdatedAt: user.UpdatedAt,

@@ -11,160 +11,177 @@ import (
 	"github.com/projuktisheba/erp-mini-api/internal/utils"
 )
 
-// userContextKey is the key used to store user claims in the request context
-type contextKey string
+type Role string
 
-// AuthUser is a middleware that checks if the user is authenticated
-// It expects the Authorization header to be present in the request
-// If the header is missing or invalid, it returns a 401 Unauthorized response
-// If the token is valid, it adds the user claims to the request context
-// and proceeds to the next handler
+const (
+	RoleAdmin    Role = "admin"
+	RoleManager  Role = "manager"
+	RoleEmployee Role = "employee"
+)
+
+// consistent context key used everywhere
+type contextKey string
+const userContextKey = contextKey("user")
+
+// ========================= AUTH USER ==============================
+// AuthUser: validates JWT, attaches *models.JWT to context.
+// Important: skips OPTIONS (CORS preflight) so preflight won't be blocked.
 func (app *application) AuthUser(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		// Get the Authorization header
+		// Allow preflight through
+		if r.Method == http.MethodOptions {
+			next.ServeHTTP(w, r)
+			return
+		}
+
 		authHeader := r.Header.Get("Authorization")
+		app.infoLog.Printf("AuthUser: %s %s Authorization=%q", r.Method, r.URL.Path, authHeader)
+
 		if authHeader == "" {
-			app.errorLog.Println("No authorization header")
+			app.errorLog.Println("AuthUser: no Authorization header")
 			utils.WriteJSON(w, http.StatusUnauthorized, models.Response{
 				Error:   true,
-				Message: "Unauthorized",
+				Message: "Unauthorized: Missing Authorization header",
 			})
 			return
 		}
 
-		// Check if the Authorization header has the correct format
-		parts := strings.Split(authHeader, " ")
-		if len(parts) != 2 || parts[0] != "Bearer" {
-			app.errorLog.Println("Invalid authorization header format")
+		parts := strings.Fields(authHeader)
+		if len(parts) != 2 || strings.ToLower(parts[0]) != "bearer" {
+			app.errorLog.Println("AuthUser: invalid Authorization header format")
 			utils.WriteJSON(w, http.StatusUnauthorized, models.Response{
 				Error:   true,
-				Message: "Access Denied: Invalid Authorization Header",
+				Message: "Unauthorized: Invalid Authorization header",
 			})
 			return
 		}
 
-		// Get the token
 		tokenString := parts[1]
-
-		// Parse and validate the token
 		token, err := jwt.Parse(tokenString, func(token *jwt.Token) (interface{}, error) {
-			// Validate the signing method
+			// verify signing method is HMAC (HS256 etc.)
 			if _, ok := token.Method.(*jwt.SigningMethodHMAC); !ok {
+				app.errorLog.Printf("AuthUser: unexpected signing method: %T", token.Method)
 				return nil, jwt.ErrSignatureInvalid
 			}
-			return []byte(app.config.JWT.SecretKey), nil // Replace with your actual secret key
+			return []byte(app.config.JWT.SecretKey), nil
 		})
 
 		if err != nil {
-			app.errorLog.Printf("Error parsing token: %v", err)
+			app.errorLog.Printf("AuthUser: token parse error: %v", err)
 			utils.WriteJSON(w, http.StatusUnauthorized, models.Response{
 				Error:   true,
-				Message: "Access Denied: Invalid Token",
+				Message: "Unauthorized: Invalid token",
 			})
 			return
 		}
 
-		// Check if the token is valid
-		if claims, ok := token.Claims.(jwt.MapClaims); ok && token.Valid {
-			// Check if the token is expired
-			exp, ok := claims["exp"].(float64)
-			if !ok || float64(time.Now().Unix()) > exp {
-				app.errorLog.Println("Token expired")
+		claims, ok := token.Claims.(jwt.MapClaims)
+		if !ok || !token.Valid {
+			app.errorLog.Println("AuthUser: invalid token claims or token not valid")
+			utils.WriteJSON(w, http.StatusUnauthorized, models.Response{
+				Error:   true,
+				Message: "Unauthorized: Invalid token",
+			})
+			return
+		}
+
+		// optional: explicit exp check
+		if expVal, ok := claims["exp"].(float64); ok {
+			if time.Now().Unix() > int64(expVal) {
+				app.errorLog.Println("AuthUser: token expired")
 				utils.WriteJSON(w, http.StatusUnauthorized, models.Response{
 					Error:   true,
-					Message: "Token expired",
+					Message: "Unauthorized: Token expired",
+				})
+				return
+			}
+		}
+
+		// Safely map claims to your models.JWT
+		tokenUser := &models.JWT{}
+		if idf, ok := claims["id"].(float64); ok {
+			tokenUser.ID = int64(idf)
+		}
+		if name, ok := claims["name"].(string); ok {
+			tokenUser.Name = name
+		}
+		if username, ok := claims["username"].(string); ok {
+			tokenUser.Username = username
+		}
+		if role, ok := claims["role"].(string); ok {
+			tokenUser.Role = role
+		}
+		if expf, ok := claims["exp"].(float64); ok {
+			tokenUser.ExpiresAt = int64(expf)
+		}
+		if iatf, ok := claims["iat"].(float64); ok {
+			tokenUser.IssuedAt = int64(iatf)
+		}
+
+		app.infoLog.Printf("AuthUser: success id=%d username=%s role=%s", tokenUser.ID, tokenUser.Username, tokenUser.Role)
+
+		// attach user to context using consistent key
+		ctx := context.WithValue(r.Context(), userContextKey, tokenUser)
+		next.ServeHTTP(w, r.WithContext(ctx))
+	})
+}
+
+// ========================= CONTEXT HELPERS ==============================
+func (app *application) UserFromContext(ctx context.Context) (*models.JWT, bool) {
+	u, ok := ctx.Value(userContextKey).(*models.JWT)
+	if !ok || u == nil {
+		return nil, false
+	}
+	return u, true
+}
+
+// ========================= ACCESS CONTROL ==============================
+func HasAccess(userRole, required Role) bool {
+	switch required {
+	case RoleAdmin:
+		return userRole == RoleAdmin
+	case RoleManager:
+		return userRole == RoleAdmin || userRole == RoleManager
+	case RoleEmployee:
+		return true
+	default:
+		return false
+	}
+}
+
+func (app *application) RequireRole(required Role) func(next http.Handler) http.Handler {
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			user, ok := app.UserFromContext(r.Context())
+			app.infoLog.Printf("RequireRole: required=%s userFound=%v", required, ok)
+			if !ok {
+				utils.WriteJSON(w, http.StatusUnauthorized, models.Response{
+					Error:   true,
+					Message: "Unauthorized: No user in context",
 				})
 				return
 			}
 
-			// Safely extract user fields from claims
-			tokenUser := &models.JWT{}
-			if idFloat, ok := claims["id"].(float64); ok {
-				tokenUser.ID = int(idFloat)
+			userRole := Role(user.Role)
+			app.infoLog.Printf("RequireRole: userRole=%s required=%s", userRole, required)
+			if !HasAccess(userRole, required) {
+				utils.WriteJSON(w, http.StatusForbidden, models.Response{
+					Error:   true,
+					Message: "Forbidden: Insufficient permissions",
+				})
+				return
 			}
-			if name, ok := claims["name"].(string); ok {
-				tokenUser.Name = name
-			}
-			if username, ok := claims["username"].(string); ok {
-				tokenUser.Username = username
-			}
-			if role, ok := claims["role"].(string); ok {
-				tokenUser.Role = role
-			}
-			if iss, ok := claims["iss"].(string); ok {
-				tokenUser.Issuer = iss
-			}
-			if aud, ok := claims["aud"].(string); ok {
-				tokenUser.Audience = aud
-			}
-			if exp, ok := claims["exp"].(float64); ok {
-				tokenUser.ExpiresAt = int64(exp)
-			}
-			if iat, ok := claims["iat"].(float64); ok {
-				tokenUser.IssuedAt = int64(iat)
-			}
-			// No userStruct needed; user is already a *models.User
-			app.infoLog.Println(tokenUser.ID)
-			// Add user struct to the request context
-			ctx := context.WithValue(r.Context(), contextKey("user"), tokenUser)
-			next.ServeHTTP(w, r.WithContext(ctx))
-		} else {
-			app.errorLog.Println("Invalid token")
-			utils.WriteJSON(w, http.StatusUnauthorized, models.Response{
-				Error:   true,
-				Message: "Unauthorized: Invalid Token",
-			})
-			return
-		}
-	})
-}
 
-// GetUserTokenFromContext retrieves the user claims from the request context
-// It returns the user struct and a boolean indicating if the user was found
-// If the user is not found, it logs an error and returns nil
-// This function is used in the AuthAdmin middleware to check if the user is an admin
-func (app *application) GetUserTokenFromContext(ctx context.Context) (*models.JWT, bool) {
-	user, ok := ctx.Value(contextKey("user")).(*models.JWT)
-	if !ok || user == nil {
-		app.errorLog.Println("No user found in context")
-		return nil, false
+			next.ServeHTTP(w, r)
+		})
 	}
-	return user, true
 }
 
-// AuthAdmin is a middleware that checks if the user is an admin
-// It expects the user claims to be present in the request context
-// If the user is not an admin, it returns a 403 Forbidden response
-// If the user is an admin, it proceeds to the next handler
-func (app *application) AuthAdmin(next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		token, ok := app.GetUserTokenFromContext(r.Context())
-		if !ok {
-			utils.WriteJSON(w, http.StatusUnauthorized, models.Response{
-				Error:   true,
-				Message: "Unauthorized: No user found in context",
-			})
-			return
-		}
-		if token.Role != "admin" {
-			utils.WriteJSON(w, http.StatusForbidden, models.Response{
-				Error:   true,
-				Message: "Forbidden: You do not have permission to access this resource",
-			})
-			return
-		}
-		// If the user is an admin, proceed to the next handler
-		next.ServeHTTP(w, r)
-	})
-}
+// ========================= LOGGER ==============================
 
-// Logger is a middleware that logs the details of each HTTP request.
 func (app *application) Logger(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		app.infoLog.Println("Received request:", r.Method, r.URL.Path, "from", r.RemoteAddr)
-		// Log the request details
-		// Using log.Printf for formatted output
-		// log.Printf("Received request: %s %s from %s", r.Method, r.URL.Path, r.RemoteAddr)
 		next.ServeHTTP(w, r)
 	})
 }

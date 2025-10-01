@@ -148,7 +148,7 @@ func ParseJWT(tokenString string, cfg models.JWTConfig) (*models.JWT, error) {
 	}
 
 	return &models.JWT{
-		ID:        int(claims["id"].(float64)),
+		ID:        int64(claims["id"].(float64)),
 		Name:      claims["name"].(string),
 		Username:  claims["username"].(string),
 		Role:      claims["role"].(string),

@@ -1,61 +1,60 @@
 -- =========================
--- Table: companyprofile
+-- Table: branches
 -- =========================
-CREATE TABLE companyprofile (
-    id SERIAL PRIMARY KEY,               
-    name VARCHAR(255) NOT NULL,
-    description TEXT,
-    slogan VARCHAR(255),
-    mobile VARCHAR(50),
-    whatsapp VARCHAR(50),
-    telephone VARCHAR(50),
-    email VARCHAR(255) UNIQUE,
-    website VARCHAR(255),
-    country VARCHAR(100),
-    city VARCHAR(100),
-    postal_code VARCHAR(20),
-    logo_link TEXT,
-    opening_date DATE,
-    terms_conditions TEXT,
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+CREATE TABLE branches (
+    id BIGSERIAL PRIMARY KEY,               
+    name VARCHAR(255) NOT NULL UNIQUE,
+    description TEXT NOT null DEFAULT '',
+    slogan VARCHAR(255) NOT null DEFAULT '',
+    mobile VARCHAR(50) NOT null DEFAULT '',
+    telephone VARCHAR(50) NOT null DEFAULT '',
+    email VARCHAR(255) NOT null DEFAULT '',
+    website VARCHAR(255) NOT null DEFAULT '',
+    country VARCHAR(100) NOT null DEFAULT '',
+    city VARCHAR(100) NOT null DEFAULT '',
+    address VARCHAR (1000) NOT null DEFAULT '',
+    postal_code VARCHAR(20) NOT null DEFAULT '',
+    logo_link TEXT NOT null DEFAULT '',
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
-
--- Indexes for quick search on name and email
-CREATE INDEX idx_company_name ON companyprofile(name);
-
+-- =========================
+-- Insert initial branches
+-- =========================
+INSERT INTO branches (
+    name, description, slogan, mobile, telephone, email, website, country, city, address, postal_code, logo_link
+) VALUES
+('AL FANAR ABAYAT', 'Dummy description', 'Dummy slogan', '0000000000', '0000000000', 'dummy1@example.com', 'http://dummy1.com', 'Qatar', 'Doha', '123 Dummy Street', '00000', 'http://dummy1.com/logo.png'),
+('DIVA ABAYAT', 'Dummy description', 'Dummy slogan', '0000000001', '0000000001', 'dummy2@example.com', 'http://dummy2.com', 'Qatar', 'Doha', '456 Dummy Street', '00001', 'http://dummy2.com/logo.png'),
+('EID AL ABAYAT', 'Dummy description', 'Dummy slogan', '0000000002', '0000000002', 'dummy3@example.com', 'http://dummy3.com', 'Qatar', 'Doha', '789 Dummy Street', '00002', 'http://dummy3.com/logo.png');
 
 -- =========================
 -- Table: employees
 -- =========================
+-- Create employees table
 CREATE TABLE employees (
-    id SERIAL PRIMARY KEY,
-    fname VARCHAR(100) NOT NULL,
-    lname VARCHAR(100) NOT NULL,
-    role VARCHAR(50) NOT NULL,
-    status VARCHAR(50),
-    bio TEXT,
-    email VARCHAR(255) UNIQUE NOT NULL,
-    password TEXT NOT NULL,
-    mobile VARCHAR(50),
-    country VARCHAR(100),
-    city VARCHAR(100),
-    address VARCHAR(100),
-    postal_code VARCHAR(20),
-    tax_id VARCHAR(50),
-    base_salary NUMERIC(12,2),
-    overtime_rate NUMERIC(10,2),
-    avatar_link TEXT,
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    id BIGSERIAL PRIMARY KEY,  
+    name VARCHAR(100) NOT NULL,  
+    role VARCHAR(20) NOT NULL CHECK (role IN ('chairman', 'manager', 'salesperson', 'worker')),
+    status VARCHAR(20) NOT NULL DEFAULT 'active' CHECK(status IN('active', 'inactive')),  
+    mobile VARCHAR(20) NOT NULL UNIQUE,  
+    email VARCHAR(150)NOT null DEFAULT '',
+    password TEXT NOT null DEFAULT '',
+    passport_no VARCHAR(50)NOT null DEFAULT '',  
+    joining_date TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,  
+    address VARCHAR(1000)NOT null DEFAULT '',  
+    base_salary NUMERIC(12,2) DEFAULT 0,  
+    overtime_rate NUMERIC(12,2) DEFAULT 0,
+    avatar_link TEXT DEFAULT '',
+    branch_id BIGINT NOT NULL REFERENCES branches(id) ON DELETE CASCADE,  
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,  
+    updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP  
 );
 
-
--- Indexes for quick search on name, email, role
-CREATE INDEX idx_employee_name ON employees(fname, lname);
-CREATE INDEX idx_employee_email ON employees(email);
-CREATE INDEX idx_employee_mobile ON employees(mobile);
-CREATE INDEX idx_employee_role ON employees(role);
+-- Indexes 
+CREATE INDEX idx_employees_name ON employees(name);
+CREATE INDEX idx_employees_role ON employees(role);
+CREATE INDEX idx_employees_branch_id ON employees(branch_id);
 
 -- =========================
 -- Table: attendance

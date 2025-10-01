@@ -107,9 +107,71 @@ func (o *OrderHandler) UpdateOrder(w http.ResponseWriter, r *http.Request) {
 	utils.WriteJSON(w, http.StatusOK, resp)
 }
 
+// CheckoutOrder
+func (o *OrderHandler) CheckoutOrder(w http.ResponseWriter, r *http.Request) {
+	orderIDStr := r.URL.Query().Get("order_id")
+	orderID, err := strconv.ParseInt(orderIDStr, 10, 64)
+	if err != nil {
+		o.errorLog.Println("ERROR_01_UpdateOrderStatus: invalid order ID", err)
+		utils.BadRequest(w, err)
+		return
+	}
+
+	err = o.DB.CheckoutOrder(r.Context(), orderID, "checkout")
+	if err != nil {
+		o.errorLog.Println("ERROR_03_UpdateOrderStatus: ", err)
+		utils.BadRequest(w, err)
+		return
+	}
+
+	var resp struct {
+		Error   bool   `json:"error"`
+		Status  string `json:"status"`
+		Message string `json:"message"`
+	}
+	resp.Error = false
+	resp.Status = "success"
+	resp.Message = "Order is ready to deliver"
+
+	utils.WriteJSON(w, http.StatusOK, resp)
+}
+// orderDelivery
+func (o *OrderHandler) OrderDelivery(w http.ResponseWriter, r *http.Request) {
+	var req struct{
+		OrderID int64 `json:"order_id`
+		DeliveredBy int64 `json:"delivered_by"`
+		PaidAmount float64 `json:"paid_amount"`
+		PaymentAccountID int64 `json:"payment_account_id"`
+	}
+	err := utils.ReadJSON(w, r, &req)
+	if err != nil {
+		o.errorLog.Println("ERROR_01_UpdateOrderStatus: invalid order ID", err)
+		utils.BadRequest(w, err)
+		return
+	}
+
+	err = o.DB.ConfirmDelivery(r.Context(), req.OrderID, req.DeliveredBy, req.PaidAmount, req.PaymentAccountID)
+	if err != nil {
+		o.errorLog.Println("ERROR_03_UpdateOrderStatus: ", err)
+		utils.BadRequest(w, err)
+		return
+	}
+
+	var resp struct {
+		Error   bool   `json:"error"`
+		Status  string `json:"status"`
+		Message string `json:"message"`
+	}
+	resp.Error = false
+	resp.Status = "success"
+	resp.Message = "Order is ready to deliver"
+
+	utils.WriteJSON(w, http.StatusOK, resp)
+}
+
 // CancelOrder
 func (o *OrderHandler) CancelOrder(w http.ResponseWriter, r *http.Request) {
-	orderIDStr := r.URL.Query().Get("id")
+	orderIDStr := r.URL.Query().Get("order_id")
 	orderID, err := strconv.ParseInt(orderIDStr, 10, 64)
 	if err != nil {
 		o.errorLog.Println("ERROR_01_CancelOrder: invalid order ID", err)
@@ -132,45 +194,6 @@ func (o *OrderHandler) CancelOrder(w http.ResponseWriter, r *http.Request) {
 	resp.Error = false
 	resp.Status = "success"
 	resp.Message = "Order cancelled successfully"
-
-	utils.WriteJSON(w, http.StatusOK, resp)
-}
-
-// UpdateOrderStatus
-func (o *OrderHandler) UpdateOrderStatus(w http.ResponseWriter, r *http.Request) {
-	orderIDStr := r.URL.Query().Get("id")
-	orderID, err := strconv.ParseInt(orderIDStr, 10, 64)
-	if err != nil {
-		o.errorLog.Println("ERROR_01_UpdateOrderStatus: invalid order ID", err)
-		utils.BadRequest(w, err)
-		return
-	}
-
-	var req struct {
-		Status string `json:"status"`
-	}
-	err = utils.ReadJSON(w, r, &req)
-	if err != nil {
-		o.errorLog.Println("ERROR_02_UpdateOrderStatus", err)
-		utils.BadRequest(w, err)
-		return
-	}
-
-	err = o.DB.UpdateOrderStatus(r.Context(), orderID, req.Status)
-	if err != nil {
-		o.errorLog.Println("ERROR_03_UpdateOrderStatus: ", err)
-		utils.BadRequest(w, err)
-		return
-	}
-
-	var resp struct {
-		Error   bool   `json:"error"`
-		Status  string `json:"status"`
-		Message string `json:"message"`
-	}
-	resp.Error = false
-	resp.Status = "success"
-	resp.Message = "Order status updated successfully"
 
 	utils.WriteJSON(w, http.StatusOK, resp)
 }
@@ -248,6 +271,8 @@ func (o *OrderHandler) ListOrdersWithFilter(w http.ResponseWriter, r *http.Reque
 func (o *OrderHandler) ListOrdersPaginatedHandler(w http.ResponseWriter, r *http.Request) {
 	pageNoStr := r.URL.Query().Get("pageNo")
 	pageLengthStr := r.URL.Query().Get("pageLength")
+	status := r.URL.Query().Get("status")
+	sortByDate := r.URL.Query().Get("sort_by_date") // "asc" or "desc"
 
 	pageNo, _ := strconv.Atoi(pageNoStr)
 	if pageNo <= 0 {
@@ -258,7 +283,7 @@ func (o *OrderHandler) ListOrdersPaginatedHandler(w http.ResponseWriter, r *http
 		pageLength = 10
 	}
 
-	orders, err := o.DB.ListOrdersPaginated(r.Context(), pageNo, pageLength)
+	orders, err := o.DB.ListOrdersPaginated(r.Context(), pageNo, pageLength, status, sortByDate)
 	if err != nil {
 		o.errorLog.Println("ERROR_01_ListOrdersPaginated: ", err)
 		utils.BadRequest(w, err)
