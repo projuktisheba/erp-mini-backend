@@ -53,7 +53,7 @@ func (a *AttendanceHandler) MarkEmployeePresent(w http.ResponseWriter, r *http.R
 		return
 	}
 	req.WorkDate = workDate
-
+	req.Status = "Present"
 	// Update DB
 	err = a.DB.UpdateTodayAttendance(r.Context(), req)
 	if err != nil {

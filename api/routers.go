@@ -1,6 +1,7 @@
 package api
 
 import (
+	"net"
 	"net/http"
 	"path/filepath"
 
@@ -31,15 +32,25 @@ func (app *application) routes() http.Handler {
 	fs := http.StripPrefix("/api/v1/images/", http.FileServer(http.Dir(imageDir)))
 	mux.Handle("/api/v1/images/*", fs)
 
-	// --- Health check endpoint ---
 	mux.Get("/ping", func(w http.ResponseWriter, r *http.Request) {
-		utils.WriteJSON(w, 200, "Live")
+		ip := "unknown"
+		// Try to get the server's primary outbound IP
+		if conn, err := net.Dial("udp", "1.1.1.1:80"); err == nil {
+			defer conn.Close()
+			ip = conn.LocalAddr().(*net.UDPAddr).IP.String()
+		}
+
+		resp := map[string]interface{}{
+			"status":    "live",
+			"server_ip": ip,
+		}
+		utils.WriteJSON(w, http.StatusOK, resp)
 	})
 
 	mux.Post("/api/v1/login", app.Handlers.Auth.Signin)
 
 	//Branches List
-	
+
 	// -------------------- HR(Employee) Routes --------------------
 	mux.Route("/api/v1/hr", func(r chi.Router) {
 		// r.Use(app.RequireRole(RoleManager))

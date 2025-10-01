@@ -27,7 +27,7 @@ func (a *AttendanceRepo) UpdateTodayAttendance(ctx context.Context, employeeAtte
 	// Insert or update in DB
 	query := `
 		INSERT INTO attendance (employee_id, work_date, status, overtime_hours)
-		VALUES ($1, $2, $3, $4, $5, $6)
+		VALUES ($1, $2, $3, $4)
 		ON CONFLICT (employee_id, work_date)
 		DO UPDATE SET status = EXCLUDED.status,
 					  overtime_hours = EXCLUDED.overtime_hours,
@@ -54,7 +54,7 @@ func (a *AttendanceRepo) BatchUpdateTodayAttendance(ctx context.Context, entries
 	for _, e := range entries {
 		batch.Queue(`
 			INSERT INTO attendance (employee_id, work_date, status, overtime_hours)
-			VALUES ($1, $2, $3, $4, $5, $6)
+			VALUES ($1, $2, $3, $4)
 			ON CONFLICT (employee_id, work_date)
 			DO UPDATE SET status = EXCLUDED.status,
 						  overtime_hours = EXCLUDED.overtime_hours,

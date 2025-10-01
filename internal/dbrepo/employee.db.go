@@ -78,14 +78,15 @@ func (user *EmployeeRepo) GetEmployeeByID(ctx context.Context, id int64) (*model
 	return e, nil
 }
 
-// GetEmployeeByEmail fetches an employee by email
-func (user *EmployeeRepo) GetEmployeeByEmail(ctx context.Context, username string) (*models.Employee, error) {
+// GetEmployeeByUsernameOrMobile fetches an employee by mobile or email
+func (user *EmployeeRepo) GetEmployeeByUsernameOrMobile(ctx context.Context, username string) (*models.Employee, error) {
 	query := `
 		SELECT 
 			id, name, role, mobile, email, password, passport_no, joining_date, address, 
 			base_salary, overtime_rate, branch_id, created_at, updated_at
 		FROM employees 
-		WHERE email = $1
+		WHERE mobile = $1 OR email = $1
+		LIMIT 1
 	`
 	e := &models.Employee{}
 	err := user.db.QueryRow(ctx, query, username).Scan(
@@ -102,6 +103,7 @@ func (user *EmployeeRepo) GetEmployeeByEmail(ctx context.Context, username strin
 	}
 	return e, nil
 }
+
 
 // UpdateEmployee updates employee details
 func (r *EmployeeRepo) UpdateEmployee(ctx context.Context, e *models.Employee) error {
