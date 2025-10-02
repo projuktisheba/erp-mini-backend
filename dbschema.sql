@@ -79,16 +79,31 @@ CREATE INDEX idx_attendance_status ON attendance(status)
 -- =========================
 CREATE TABLE customers (
     id BIGSERIAL PRIMARY KEY,
-    name VARCHAR(100) NOT NULL,
-    mobile VARCHAR(50) UNIQUE,
-    address VARCHAR(200) DEFAULT '',
-    tax_id VARCHAR(50) UNIQUE,
-    due_amount NUMERIC(12,2) NOT NULL DEFAULT 0.00,
+    name VARCHAR(255) NOT NULL,
+    mobile VARCHAR(20) NOT NULL UNIQUE,          -- mandatory & unique
+    address TEXT NOT NULL,
+    tax_id VARCHAR(100),
+    due_amount NUMERIC(12,2) NOT NULL DEFAULT 0,
     status BOOLEAN NOT NULL DEFAULT TRUE,
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+
+    -- Measurement fields (kept as text/varchar since no calculation needed)
+    length VARCHAR(50) DEFAULT '',
+    shoulder VARCHAR(50) DEFAULT '',
+    bust VARCHAR(50) DEFAULT '',
+    waist VARCHAR(50) DEFAULT '',
+    hip VARCHAR(50) DEFAULT '',
+    arm_hole VARCHAR(50) DEFAULT '',
+    sleeve_length VARCHAR(50) DEFAULT '',
+    sleeve_width VARCHAR(50) DEFAULT '',
+    round_width VARCHAR(50) DEFAULT '',
+
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
+
+-- Index for faster name lookups (useful for search/autocomplete)
 CREATE INDEX idx_customers_name ON customers(name);
+
 
 CREATE TABLE accounts (
     id BIGSERIAL PRIMARY KEY,

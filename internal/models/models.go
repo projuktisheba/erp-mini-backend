@@ -9,8 +9,6 @@ const (
 	APPVersion = "1.0"
 )
 
-var Passphrase = "jM/0qr%HKU&!G%MdivH#A-{oInY*Nv20"
-
 // Response is the type for response
 type Response struct {
 	Error   bool   `json:"error"`
@@ -79,18 +77,25 @@ type EmployeeNameID struct {
 	Name string `json:"name"`
 }
 
-// Customer represents the customers table
 type Customer struct {
-	ID          int64     `json:"id"`
-	Name        string    `json:"name"`
-	Address     string    `json:"address"`
-	Mobile      *string   `json:"mobile,omitempty"`
-	TaxID       *string   `json:"tax_id,omitempty"`
-	DueAmount   float64   `json:"due_amount"`
-	Status      bool      `json:"status"`
-	Measurement string    `json:"`
-	CreatedAt   time.Time `json:"created_at"`
-	UpdatedAt   time.Time `json:"updated_at"`
+	ID           int64     `json:"id"`
+	Name         string    `json:"name"`
+	Mobile       string    `json:"mobile"`
+	Address      string    `json:"address"`
+	TaxID        *string   `json:"tax_id,omitempty"`
+	DueAmount    float64   `json:"due_amount"`
+	Status       bool      `json:"status"`
+	Length       string    `json:"length,omitempty"`
+	Shoulder     string    `json:"shoulder,omitempty"`
+	Bust         string    `json:"bust,omitempty"`
+	Waist        string    `json:"waist,omitempty"`
+	Hip          string    `json:"hip,omitempty"`
+	ArmHole      string    `json:"arm_hole,omitempty"`
+	SleeveLength string    `json:"sleeve_length,omitempty"`
+	SleeveWidth  string    `json:"sleeve_width,omitempty"`
+	RoundWidth   string    `json:"round_width,omitempty"`
+	CreatedAt    time.Time `json:"created_at"`
+	UpdatedAt    time.Time `json:"updated_at"`
 }
 
 // CustomerNameID is a lightweight struct for fetching only customer's ID and Name.
