@@ -21,9 +21,7 @@ func NewProductRepo(db *pgxpool.Pool) *ProductRepo {
 func (s *ProductRepo) GetProducts(ctx context.Context) ([]*models.Product, error) {
 	query := `
         SELECT 
-            id, product_code, product_name, product_description, 
-            product_status, mrp, warranty, category_id, brand_id, 
-            stock_alert_level, created_at, updated_at
+            id, product_name, created_at, updated_at
         FROM products
         ORDER BY id;
     `
@@ -39,15 +37,7 @@ func (s *ProductRepo) GetProducts(ctx context.Context) ([]*models.Product, error
 		var p models.Product
 		if err := rows.Scan(
 			&p.ID,
-			&p.ProductCode,
 			&p.ProductName,
-			&p.ProductDescription,
-			&p.ProductStatus,
-			&p.MRP,
-			&p.Warranty,
-			&p.CategoryID,
-			&p.BrandID,
-			&p.StockAlertLevel,
 			&p.CreatedAt,
 			&p.UpdatedAt,
 		); err != nil {

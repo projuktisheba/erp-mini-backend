@@ -29,10 +29,18 @@ func NewAttendanceHandler(db *dbrepo.AttendanceRepo, infoLog *log.Logger, errorL
 
 // MarkEmployeePresent marks a single employee's attendance as present for today.
 func (a *AttendanceHandler) MarkEmployeePresent(w http.ResponseWriter, r *http.Request) {
-	var req models.Attendance
+	// Read branch id
+	branchID := utils.GetBranchID(r)
+	if branchID == 0 {
+		a.errorLog.Println("ERROR_01_MarkEmployeePresent: Branch id not found")
+		utils.BadRequest(w, errors.New("Branch ID not found. Please include 'X-Branch-ID' header, e.g., X-Branch-ID: 1"))
+		return
+	}
+
+	var reqBody models.Attendance
 
 	// Parse JSON request
-	err := utils.ReadJSON(w, r, &req)
+	err := utils.ReadJSON(w, r, &reqBody)
 	if err != nil {
 		a.errorLog.Println("ERROR_01_UpdateTodayAttendance:", err)
 		utils.BadRequest(w, err)
@@ -40,22 +48,22 @@ func (a *AttendanceHandler) MarkEmployeePresent(w http.ResponseWriter, r *http.R
 	}
 
 	// Check required field
-	if req.EmployeeID == 0 {
+	if reqBody.EmployeeID == 0 {
 		a.errorLog.Println("ERROR_02_UpdateTodayAttendance: Missing employee ID")
 		utils.BadRequest(w, errors.New("missing employee ID"))
 		return
 	}
 
-	workDate, err := time.Parse("2006-01-02", req.WorkDateStr)
+	workDate, err := time.Parse("2006-01-02", reqBody.WorkDateStr)
 	if err != nil {
-		a.errorLog.Printf("ERROR_XX: Invalid work_date %q for employee %d", req.WorkDate, req.EmployeeID)
-		utils.BadRequest(w, fmt.Errorf("invalid work_date format for employee %d, expected YYYY-MM-DD", req.EmployeeID))
+		a.errorLog.Printf("ERROR_XX: Invalid work_date %q for employee %d", reqBody.WorkDate, reqBody.EmployeeID)
+		utils.BadRequest(w, fmt.Errorf("invalid work_date format for employee %d, expected YYYY-MM-DD", reqBody.EmployeeID))
 		return
 	}
-	req.WorkDate = workDate
-	req.Status = "Present"
+	reqBody.WorkDate = workDate
+	reqBody.Status = "Present"
 	// Update DB
-	err = a.DB.UpdateTodayAttendance(r.Context(), req)
+	err = a.DB.UpdateTodayAttendance(r.Context(), branchID, reqBody)
 	if err != nil {
 		a.errorLog.Println("ERROR_06_UpdateTodayAttendance DB:", err)
 		utils.BadRequest(w, err)
@@ -64,15 +72,19 @@ func (a *AttendanceHandler) MarkEmployeePresent(w http.ResponseWriter, r *http.R
 
 	// Respond success
 	resp := struct {
-		Error         bool   `json:"error"`
-		Status        string `json:"status"`
-		Message       string `json:"message"`
-		OvertimeHours int64  `json:"overtime_hours"`
+		Error           bool   `json:"error"`
+		Status          string `json:"status"`
+		Message         string `json:"message"`
+		OvertimeHours   int64  `json:"overtime_hours"`
+		ProductionUnits int64  `json:"production_units"`
+		AdvancePayment  int64  `json:"advance_payment"`
 	}{
-		Error:         false,
-		Status:        "success",
-		Message:       "Attendance updated successfully",
-		OvertimeHours: req.OvertimeHours,
+		Error:           false,
+		Status:          "success",
+		Message:         "Attendance updated successfully",
+		OvertimeHours:   reqBody.OvertimeHours,
+		ProductionUnits: reqBody.ProductionUnits,
+		AdvancePayment:  reqBody.AdvancePayment,
 	}
 
 	utils.WriteJSON(w, http.StatusOK, resp)
@@ -80,6 +92,13 @@ func (a *AttendanceHandler) MarkEmployeePresent(w http.ResponseWriter, r *http.R
 
 // MarkEmployeesPresentBatch marks today's attendance for multiple employees as present.
 func (a *AttendanceHandler) MarkEmployeesPresentBatch(w http.ResponseWriter, r *http.Request) {
+	// Read branch id
+	branchID := utils.GetBranchID(r)
+	if branchID == 0 {
+		a.errorLog.Println("ERROR_01_MarkEmployeesPresentBatch: Branch id not found")
+		utils.BadRequest(w, errors.New("Branch ID not found. Please include 'X-Branch-ID' header, e.g., X-Branch-ID: 1"))
+		return
+	}
 
 	var req []*models.Attendance
 
@@ -117,7 +136,7 @@ func (a *AttendanceHandler) MarkEmployeesPresentBatch(w http.ResponseWriter, r *
 		att.Status = "Present"
 	}
 	// Save all records
-	err = a.DB.BatchUpdateTodayAttendance(r.Context(), req)
+	err = a.DB.BatchUpdateTodayAttendance(r.Context(), branchID, req)
 	if err != nil {
 		a.errorLog.Println("ERROR_07_BatchUpdateTodayAttendance DB:", err)
 		utils.BadRequest(w, err)
@@ -174,6 +193,14 @@ func (a *AttendanceHandler) GetEmployeeCalendar(w http.ResponseWriter, r *http.R
 
 // GetEmployeeSummary fetches monthly attendance summary for one employee
 func (a *AttendanceHandler) GetEmployeeSummary(w http.ResponseWriter, r *http.Request) {
+	// Read branch id
+	branchID := utils.GetBranchID(r)
+	if branchID == 0 {
+		a.errorLog.Println("ERROR_01_GetEmployeeSummary: Branch id not found")
+		utils.BadRequest(w, errors.New("Branch ID not found. Please include 'X-Branch-ID' header, e.g., X-Branch-ID: 1"))
+		return
+	}
+
 	employeeID := r.URL.Query().Get("employee_id")
 	month := r.URL.Query().Get("month")
 
@@ -183,7 +210,7 @@ func (a *AttendanceHandler) GetEmployeeSummary(w http.ResponseWriter, r *http.Re
 		return
 	}
 
-	summary, err := a.DB.GetEmployeeSummary(r.Context(), employeeID, month)
+	summary, err := a.DB.GetEmployeeSummary(r.Context(), employeeID, branchID, month)
 	if err != nil {
 		a.errorLog.Println("ERROR_02_GetEmployeeSummary:", err)
 		utils.BadRequest(w, err)
@@ -206,11 +233,19 @@ func (a *AttendanceHandler) GetEmployeeSummary(w http.ResponseWriter, r *http.Re
 
 // GetBatchSummary fetches monthly attendance summaries for multiple employees
 func (a *AttendanceHandler) GetBatchSummary(w http.ResponseWriter, r *http.Request) {
+	// Read branch id
+	branchID := utils.GetBranchID(r)
+	if branchID == 0 {
+		a.errorLog.Println("ERROR_01_GetEmployeeProgressReport: Branch id not found")
+		utils.BadRequest(w, errors.New("Branch ID not found. Please include 'X-Branch-ID' header, e.g., X-Branch-ID: 1"))
+		return
+	}
+
 	month := r.URL.Query().Get("month")
 	start := r.URL.Query().Get("start")
 	end := r.URL.Query().Get("end")
 
-	summaries, err := a.DB.GetBatchSummary(r.Context(), month, start, end)
+	summaries, err := a.DB.GetBatchSummary(r.Context(), month, start, end, branchID)
 	if err != nil {
 		a.errorLog.Println("ERROR_01_GetBatchSummary:", err)
 		utils.BadRequest(w, err)

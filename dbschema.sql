@@ -53,6 +53,7 @@ CREATE TABLE employees (
 
 -- Indexes 
 CREATE INDEX idx_employees_name ON employees(name);
+CREATE INDEX idx_employees_mobile ON employees(mobile);
 CREATE INDEX idx_employees_role ON employees(role);
 CREATE INDEX idx_employees_branch_id ON employees(branch_id);
 
@@ -63,8 +64,11 @@ CREATE TABLE attendance (
     id SERIAL PRIMARY KEY,
     employee_id INT NOT NULL REFERENCES employees(id) ON DELETE CASCADE,
     work_date DATE NOT NULL,
+    branch_id BIGINT NOT NULL REFERENCES branches(id) ON DELETE CASCADE,
     status VARCHAR(20) NOT NULL DEFAULT 'Present' CHECK (status IN ('Present', 'Absent', 'Leave')),
-    overtime_hours INT DEFAULT 0,
+    advance_payment BIGINT DEFAULT 0,
+    production_units BIGINT DEFAULT 0,
+    overtime_hours BIGINT DEFAULT 0,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     UNIQUE(employee_id, work_date)
@@ -72,7 +76,7 @@ CREATE TABLE attendance (
 
 CREATE INDEX idx_attendance_employee_date ON attendance(employee_id, work_date);
 CREATE INDEX idx_attendance_work_date ON attendance(work_date);
-CREATE INDEX idx_attendance_status ON attendance(status)
+CREATE INDEX idx_attendance_status ON attendance(status);
 
 -- =========================
 -- Table: customers
@@ -80,11 +84,12 @@ CREATE INDEX idx_attendance_status ON attendance(status)
 CREATE TABLE customers (
     id BIGSERIAL PRIMARY KEY,
     name VARCHAR(255) NOT NULL,
-    mobile VARCHAR(20) NOT NULL UNIQUE,          -- mandatory & unique
-    address TEXT NOT NULL,
-    tax_id VARCHAR(100),
+    mobile VARCHAR(20) NOT NULL UNIQUE,
+    address TEXT NOT NULL DEFAULT '',
+    tax_id VARCHAR(100) DEFAULT '',
     due_amount NUMERIC(12,2) NOT NULL DEFAULT 0,
     status BOOLEAN NOT NULL DEFAULT TRUE,
+    branch_id BIGINT NOT NULL REFERENCES branches(id) ON DELETE CASCADE,  
 
     -- Measurement fields (kept as text/varchar since no calculation needed)
     length VARCHAR(50) DEFAULT '',
@@ -96,6 +101,7 @@ CREATE TABLE customers (
     sleeve_length VARCHAR(50) DEFAULT '',
     sleeve_width VARCHAR(50) DEFAULT '',
     round_width VARCHAR(50) DEFAULT '',
+    
 
     created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
@@ -103,92 +109,131 @@ CREATE TABLE customers (
 
 -- Index for faster name lookups (useful for search/autocomplete)
 CREATE INDEX idx_customers_name ON customers(name);
+CREATE INDEX idx_customers_mobile ON customers(name);
 
 
 CREATE TABLE accounts (
     id BIGSERIAL PRIMARY KEY,
-    name VARCHAR(100) NOT NULL UNIQUE, -- e.g., Cash, Bank, bKash, Rocket, etc.
+    name VARCHAR(100) NOT NULL , -- e.g., Cash, Bank, ATM etc.
     type VARCHAR(50) NOT NULL CHECK (type IN ('cash', 'bank', 'mfs', 'other')),
     current_balance NUMERIC(12,2) NOT NULL DEFAULT 0.00,
+    branch_id BIGINT NOT NULL REFERENCES branches(id) ON DELETE CASCADE,  
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
--- =========================
--- Table: Category
--- =========================
-CREATE TABLE public.categories (
-    id BIGSERIAL PRIMARY KEY,
-    name character varying(255) DEFAULT ''::character varying NOT NULL,
-    status boolean DEFAULT true NOT NULL,
-   created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-);
--- =========================
--- Table: Brand
--- =========================
-CREATE TABLE public.brands (
-    id BIGSERIAL PRIMARY KEY,
-    name character varying(255) DEFAULT ''::character varying NOT NULL,
-    status boolean DEFAULT true NOT NULL,
-   created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-);
+INSERT INTO public.accounts (name, type, branch_id) 
+VALUES 
+  ('Cash', 'cash', 1),
+  ('Bank', 'bank', 1),
+  ('Cash', 'cash', 2),
+  ('Bank', 'bank', 2),
+  ('Cash', 'cash', 3),
+  ('Bank', 'bank', 3);
 -- =========================
 -- Table: Product
 -- =========================
 CREATE TABLE public.products (
     id BIGSERIAL PRIMARY KEY,
-    product_code character varying(255) DEFAULT ''::character varying NOT NULL,
     product_name character varying(255) DEFAULT ''::character varying NOT NULL,
-    product_description character varying(255) DEFAULT ''::character varying NOT NULL,
-    product_status boolean DEFAULT true NOT NULL,
-    mrp bigint DEFAULT 0 NOT NULL,
-    warranty integer DEFAULT 0 NOT NULL,
-    category_id bigint,
-    brand_id bigint ,
-    stock_alert_level smallint DEFAULT 0 NOT NULL,
     created_at timestamp without time zone DEFAULT CURRENT_TIMESTAMP,
     updated_at timestamp without time zone DEFAULT CURRENT_TIMESTAMP
 );
+INSERT INTO public.products (product_name) 
+VALUES 
+  ('Abayat Shela (L)'),
+  ('Abayat Shela (M)'),
+  ('Abayat Shela (S)'),
+  ('Abayat Raj'),
+  ('Khamar');
 -- =========================
 -- Table: orders
 -- =========================
 CREATE TABLE orders (
     id BIGSERIAL PRIMARY KEY,
+    branch_id BIGINT NOT NULL REFERENCES branches(id) ON DELETE CASCADE,
     memo_no VARCHAR(100) NOT NULL UNIQUE,
     order_date DATE NOT NULL DEFAULT CURRENT_DATE,
     
-    sales_man_id BIGINT NOT NULL REFERENCES employees(id) ON DELETE RESTRICT,
+    salesperson_id BIGINT NOT NULL REFERENCES employees(id) ON DELETE RESTRICT,
     customer_id BIGINT NOT NULL REFERENCES customers(id) ON DELETE RESTRICT,
     
     total_payable_amount NUMERIC(12,2) NOT NULL,
     advance_payment_amount NUMERIC(12,2) DEFAULT 0,
-    due_amount NUMERIC(12,2) GENERATED ALWAYS AS (total_payable_amount - advance_payment_amount) STORED,
-    
-    payment_account_id BIGINT REFERENCES accounts(id) ON DELETE SET NULL, -- 🔹 Added
+
+    payment_account_id BIGINT REFERENCES accounts(id) ON DELETE SET NULL,
     
     status VARCHAR(20) NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'checkout', 'delivery', 'cancelled')),
     
     delivery_date DATE,
-    delivered_by BIGINT REFERENCES employees(id) ON DELETE SET NULL,
+    exit_date DATE,
     
-    notes TEXT,
+    notes TEXT DEFAULT '',
     
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
-CREATE INDEX idx_orders_date_status ON orders(order_date, status);
-CREATE INDEX idx_orders_date ON orders(order_date);
+-- =========================
+-- Optimized Indexes for orders table
+-- =========================
+
+-- Single-column indexes
+CREATE INDEX IF NOT EXISTS idx_orders_salesperson_id
+ON orders(salesperson_id);
+
+CREATE INDEX IF NOT EXISTS idx_orders_customer_id
+ON orders(customer_id);
+
+CREATE INDEX IF NOT EXISTS idx_orders_payment_account_id
+ON orders(payment_account_id);
+
+CREATE INDEX IF NOT EXISTS idx_orders_status
+ON orders(status);
+
+CREATE INDEX IF NOT EXISTS idx_orders_branch_id
+ON orders(branch_id);
+
+-- Composite indexes for common multi-column filters
+-- a) Salesperson + Customer + Status + order_date DESC (for dashboard queries)
+CREATE INDEX IF NOT EXISTS idx_orders_salesperson_customer_status
+ON orders(salesperson_id, customer_id, status, order_date DESC);
+
+-- b) Salesperson + Status + order_date DESC
+CREATE INDEX IF NOT EXISTS idx_orders_salesperson_status
+ON orders(salesperson_id, status, order_date DESC);
+
+-- c) Customer + Status + order_date DESC
+CREATE INDEX IF NOT EXISTS idx_orders_customer_status
+ON orders(customer_id, status, order_date DESC);
+
+-- Partial indexes for frequently queried statuses
+CREATE INDEX IF NOT EXISTS idx_orders_pending
+ON orders(order_date DESC)
+WHERE status = 'pending';
+
+CREATE INDEX IF NOT EXISTS idx_orders_checkout
+ON orders(order_date DESC)
+WHERE status = 'checkout';
+
+CREATE INDEX IF NOT EXISTS idx_orders_delivery
+ON orders(order_date DESC)
+WHERE status = 'delivery';
+
+CREATE INDEX IF NOT EXISTS idx_orders_cancelled
+ON orders(order_date DESC)
+WHERE status = 'cancelled';
+
+
 -- Order items for handling multiple products per order
 CREATE TABLE order_items (
     id BIGSERIAL PRIMARY KEY,
-    order_id BIGINT NOT NULL REFERENCES orders(id) ON DELETE CASCADE,
+    memo_no VARCHAR(100) NOT NULL REFERENCES orders(memo_no) ON DELETE CASCADE,
     product_id BIGINT NOT NULL REFERENCES products(id) ON DELETE RESTRICT,
     quantity INT NOT NULL CHECK (quantity > 0),
-    unit_price NUMERIC(12,2) NOT NULL,
+    subtotal NUMERIC(12,2) NOT NULL
 );
 CREATE TABLE transactions (
     transaction_id BIGSERIAL PRIMARY KEY,
+    branch_id BIGINT NOT NULL REFERENCES branches(id) ON DELETE CASCADE,
     from_entity_id BIGINT NOT NULL,
     from_entity_type VARCHAR(50),  -- optional, can be 'account', 'customer', 'employee', etc.
     
@@ -203,5 +248,63 @@ CREATE TABLE transactions (
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
+-- Indexes for quick search by purchase_date, memo_no, supplier_id
+CREATE INDEX idx_transactions_created_date ON transactions(created_at);
+CREATE INDEX idx_transactions_type ON transactions(transaction_type);
+CREATE INDEX idx_transactions_from_entity_id ON transactions(from_entity_id);
+CREATE INDEX idx_transactions_from_entity_type ON transactions(from_entity_type);
+CREATE INDEX idx_transactions_to_entity_id ON transactions(to_entity_id);
+CREATE INDEX idx_transactions_to_entity_type ON transactions(to_entity_type);
+-- =========================
+-- Table: suppliers
+-- =========================
+CREATE TABLE suppliers (
+    id BIGSERIAL PRIMARY KEY,
+    name VARCHAR(100) NOT NULL,
+    status VARCHAR(20) NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'inactive')),
+    mobile VARCHAR(20) NOT NULL UNIQUE,
+    branch_id BIGINT NOT NULL REFERENCES branches(id) ON DELETE CASCADE,  
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+-- Index for quick search by name, mobile and status
+CREATE INDEX idx_suppliers_name_status ON suppliers(name, status);
+CREATE INDEX idx_suppliers_mobile ON suppliers(mobile);
+CREATE INDEX idx_suppliers_branch_id ON suppliers(branch_id);
 
 
+-- =========================
+-- Table: purchase
+-- =========================
+CREATE TABLE purchase (
+    id BIGSERIAL PRIMARY KEY,
+    memo_no VARCHAR(100) NOT NULL DEFAULT '',
+    purchase_date DATE NOT NULL DEFAULT CURRENT_DATE,
+    supplier_id BIGINT NOT NULL REFERENCES suppliers(id) ON DELETE RESTRICT,
+    branch_id BIGINT NOT NULL REFERENCES branches(id) ON DELETE CASCADE,
+    total_amount NUMERIC(12,2) NOT NULL,
+    notes TEXT DEFAULT '',
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+-- Indexes for quick search by purchase_date, memo_no, supplier_id
+CREATE INDEX idx_purchase_date ON purchase(purchase_date);
+CREATE INDEX idx_purchase_memo_no ON purchase(memo_no);
+CREATE INDEX idx_purchase_supplier_id ON purchase(supplier_id);
+
+-- top_sheet holds the daily balances
+CREATE TABLE top_sheet (
+    id BIGSERIAL PRIMARY KEY,
+    sheet_date DATE NOT NULL DEFAULT CURRENT_DATE,
+    branch_id BIGINT NOT NULL REFERENCES branches(id) ON DELETE CASCADE,
+    expense NUMERIC(12,2) NOT NULL,
+    cash NUMERIC(12,2) NOT NULL,
+    bank NUMERIC(12,2) NOT NULL,
+    order_count BIGINT NOT NULL,
+    delivery BIGINT NOT NULL,
+    checkout BIGINT NOT NULL,
+    UNIQUE(sheet_date, branch_id)
+);
+CREATE INDEX idx_top_sheet_sheet_date ON top_sheet(sheet_date, branch_id);

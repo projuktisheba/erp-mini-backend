@@ -6,6 +6,7 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"strconv"
 	"time"
 
 	"github.com/golang-jwt/jwt/v5"
@@ -62,8 +63,9 @@ func BadRequest(w http.ResponseWriter, err error) {
 
 	payload.Error = true
 	payload.Message = err.Error()
-	_ = WriteJSON(w, http.StatusOK, payload)
+	_ = WriteJSON(w, http.StatusBadRequest, payload)
 }
+
 // NotFound sends a 404 JSON response with a standard structure.
 func NotFound(w http.ResponseWriter, message string) {
 	if message == "" {
@@ -84,6 +86,7 @@ func NotFound(w http.ResponseWriter, message string) {
 	w.WriteHeader(http.StatusNotFound)
 	_ = json.NewEncoder(w).Encode(resp)
 }
+
 // ServerError sends a 500 JSON response with a standard structure.
 func ServerError(w http.ResponseWriter, err error) {
 	message := "Internal server error"
@@ -105,6 +108,7 @@ func ServerError(w http.ResponseWriter, err error) {
 	w.WriteHeader(http.StatusInternalServerError)
 	_ = json.NewEncoder(w).Encode(resp)
 }
+
 // EnsureDir checks if a directory exists, and creates it if it does not.
 func EnsureDir(dir string) error {
 	return os.MkdirAll(dir, os.ModePerm)
@@ -179,6 +183,7 @@ func Today() time.Time {
 	now := time.Now()
 	return time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, now.Location())
 }
+
 // NullableTime converts zero time to nil
 func NullableTime(t time.Time) any {
 	if t.IsZero() {
@@ -187,3 +192,7 @@ func NullableTime(t time.Time) any {
 	return t
 }
 
+func GetBranchID(r *http.Request) int64 {
+	branchID, _ := strconv.ParseInt(r.Header.Get("X-Branch-ID"), 10, 64)
+	return branchID
+}

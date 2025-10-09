@@ -1,6 +1,7 @@
 package api
 
 import (
+	"errors"
 	"fmt"
 	"log"
 	"net/http"
@@ -28,6 +29,13 @@ func (t *TransactionHandler) GetTransactionSummaryHandler(w http.ResponseWriter,
 	endDate := r.URL.Query().Get("end_date")
 	if startDate == "" || endDate == "" {
 		utils.BadRequest(w, fmt.Errorf("start_date and end_date are required"))
+		return
+	}
+	//read branch id
+	branchID := utils.GetBranchID(r)
+	if branchID == 0 {
+		t.errorLog.Println("ERROR_01_GetTransactionSummaryHandler: Branch id not found")
+		utils.BadRequest(w, errors.New("Branch ID not found. Please include 'X-Branch-ID' header, e.g., X-Branch-ID: 1"))
 		return
 	}
 
@@ -60,7 +68,7 @@ func (t *TransactionHandler) GetTransactionSummaryHandler(w http.ResponseWriter,
 		trxType = &val
 	}
 
-	transactions, err := t.DB.GetTransactionSummary(r.Context(), startDate, endDate, fromID, toID, fromType, toType, trxType)
+	transactions, err := t.DB.GetTransactionSummary(r.Context(), branchID, startDate, endDate, fromID, toID, fromType, toType, trxType)
 	if err != nil {
 		t.errorLog.Println("ERROR_01_GetTransactionSummaryHandler: ", err)
 		utils.BadRequest(w, err)
@@ -113,10 +121,16 @@ func (t *TransactionHandler) ListTransactionsPaginatedHandler(w http.ResponseWri
 	if val := r.URL.Query().Get("transaction_type"); val != "" {
 		trxType = &val
 	}
-
-	transactions, err := t.DB.ListTransactionsPaginated(r.Context(), pageNo, pageLength, fromID, toID, fromType, toType, trxType)
+	//read branch id
+	branchID := utils.GetBranchID(r)
+	if branchID == 0 {
+		t.errorLog.Println("ERROR_01_ListTransactionsPaginatedHandler: Branch id not found")
+		utils.BadRequest(w, errors.New("Branch ID not found. Please include 'X-Branch-ID' header, e.g., X-Branch-ID: 1"))
+		return
+	}
+	transactions, err := t.DB.ListTransactionsPaginated(r.Context(), branchID, pageNo, pageLength, fromID, toID, fromType, toType, trxType)
 	if err != nil {
-		t.errorLog.Println("ERROR_01_ListTransactionsPaginatedHandler: ", err)
+		t.errorLog.Println("ERROR_02_ListTransactionsPaginatedHandler: ", err)
 		utils.BadRequest(w, err)
 		return
 	}

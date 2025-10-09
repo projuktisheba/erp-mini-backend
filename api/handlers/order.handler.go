@@ -7,8 +7,8 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"time"
 
-	"github.com/google/uuid"
 	"github.com/projuktisheba/erp-mini-api/internal/dbrepo"
 	"github.com/projuktisheba/erp-mini-api/internal/models"
 	"github.com/projuktisheba/erp-mini-api/internal/utils"
@@ -29,6 +29,7 @@ func NewOrderHandler(db *dbrepo.OrderRepo, infoLog *log.Logger, errorLog *log.Lo
 }
 
 func (o *OrderHandler) AddOrder(w http.ResponseWriter, r *http.Request) {
+
 	var orderDetails models.Order
 	err := utils.ReadJSON(w, r, &orderDetails)
 	if err != nil {
@@ -36,27 +37,18 @@ func (o *OrderHandler) AddOrder(w http.ResponseWriter, r *http.Request) {
 		utils.BadRequest(w, err)
 		return
 	}
-
-	//set status to pending
-	orderDetails.Status = "pending"
-
-	// Only generate if MemoNo is empty
-	if strings.TrimSpace(orderDetails.MemoNo) == "" {
-		totalOrders, err := o.DB.GetOrderCount(r.Context())
-		if err != nil {
-			// Fallback to UUID
-			orderDetails.MemoNo = uuid.NewString()
-		} else {
-			// Use zero-padded sequential number
-			// Always pad to 6 digits: 000001, 000002, ...
-			orderDetails.MemoNo = fmt.Sprintf("%06d", totalOrders+1)
-		}
+	//read branch id
+	branchID := utils.GetBranchID(r)
+	if branchID == 0 {
+		o.errorLog.Println("ERROR_02_AddOrder: Branch id not found")
+		utils.BadRequest(w, errors.New("Branch ID not found. Please include 'X-Branch-ID' header, e.g., X-Branch-ID: 1"))
+		return
 	}
-
+	orderDetails.BranchID = branchID
 	// Create the order
 	err = o.DB.CreateOrder(r.Context(), &orderDetails)
 	if err != nil {
-		o.errorLog.Println("ERROR_02_AddOrder: ", err)
+		o.errorLog.Println("ERROR_03_AddOrder: ", err)
 		utils.BadRequest(w, err)
 		return
 	}
@@ -109,17 +101,32 @@ func (o *OrderHandler) UpdateOrder(w http.ResponseWriter, r *http.Request) {
 
 // CheckoutOrder
 func (o *OrderHandler) CheckoutOrder(w http.ResponseWriter, r *http.Request) {
+	// Read branch id
+	// branchID := utils.GetBranchID(r)
+	// o.infoLog.Println("branch id",branchID)
+	// if branchID == 0 {
+	// 	o.errorLog.Println("ERROR_01_CheckoutOrder: Branch id not found")
+	// 	utils.BadRequest(w, errors.New("Branch ID not found. Please include 'X-Branch-ID' header, e.g., X-Branch-ID: 1"))
+	// 	return
+	// }
 	orderIDStr := r.URL.Query().Get("order_id")
 	orderID, err := strconv.ParseInt(orderIDStr, 10, 64)
 	if err != nil {
-		o.errorLog.Println("ERROR_01_UpdateOrderStatus: invalid order ID", err)
+		o.errorLog.Println("ERROR_02_CheckoutOrder: invalid order ID", err)
 		utils.BadRequest(w, err)
 		return
 	}
-
-	err = o.DB.CheckoutOrder(r.Context(), orderID, "checkout")
+	branchIDStr := r.URL.Query().Get("branch_id")
+	branchID, err := strconv.ParseInt(branchIDStr, 10, 64)
 	if err != nil {
-		o.errorLog.Println("ERROR_03_UpdateOrderStatus: ", err)
+		o.errorLog.Println("ERROR_01_CheckoutOrder: Branch id not found")
+		utils.BadRequest(w, errors.New("Branch ID not found. Please include 'X-Branch-ID' header, e.g., X-Branch-ID: 1"))
+		return
+	}
+
+	err = o.DB.CheckoutOrder(r.Context(), orderID, branchID)
+	if err != nil {
+		o.errorLog.Println("ERROR_03_CheckoutOrder: ", err)
 		utils.BadRequest(w, err)
 		return
 	}
@@ -135,24 +142,38 @@ func (o *OrderHandler) CheckoutOrder(w http.ResponseWriter, r *http.Request) {
 
 	utils.WriteJSON(w, http.StatusOK, resp)
 }
+
 // orderDelivery
 func (o *OrderHandler) OrderDelivery(w http.ResponseWriter, r *http.Request) {
-	var req struct{
-		OrderID int64 `json:"order_id`
-		DeliveredBy int64 `json:"delivered_by"`
-		PaidAmount float64 `json:"paid_amount"`
-		PaymentAccountID int64 `json:"payment_account_id"`
+	// Read branch id
+	branchID := utils.GetBranchID(r)
+	if branchID == 0 {
+		o.errorLog.Println("ERROR_01_OrderDelivery: Branch id not found")
+		utils.BadRequest(w, errors.New("Branch ID not found. Please include 'X-Branch-ID' header, e.g., X-Branch-ID: 1"))
+		return
+	}
+	var req struct {
+		OrderID          int64   `json:"order_id"`
+		ExitDate         string  `json:"exit_date"`
+		PaidAmount       float64 `json:"paid_amount"`
+		PaymentAccountID int64   `json:"payment_account_id"`
 	}
 	err := utils.ReadJSON(w, r, &req)
 	if err != nil {
-		o.errorLog.Println("ERROR_01_UpdateOrderStatus: invalid order ID", err)
+		o.errorLog.Println("ERROR_02_OrderDelivery: invalid order ID", err)
+		utils.BadRequest(w, err)
+		return
+	}
+	exitDate, err := time.Parse("2006-01-02", req.ExitDate)
+	if err != nil {
+		o.errorLog.Println("ERROR_02_OrderDelivery: invalid exit date", err)
 		utils.BadRequest(w, err)
 		return
 	}
 
-	err = o.DB.ConfirmDelivery(r.Context(), req.OrderID, req.DeliveredBy, req.PaidAmount, req.PaymentAccountID)
+	err = o.DB.ConfirmDelivery(r.Context(), req.OrderID, branchID, exitDate, req.PaidAmount, req.PaymentAccountID)
 	if err != nil {
-		o.errorLog.Println("ERROR_03_UpdateOrderStatus: ", err)
+		o.errorLog.Println("ERROR_03_OrderDelivery: ", err)
 		utils.BadRequest(w, err)
 		return
 	}
@@ -164,24 +185,32 @@ func (o *OrderHandler) OrderDelivery(w http.ResponseWriter, r *http.Request) {
 	}
 	resp.Error = false
 	resp.Status = "success"
-	resp.Message = "Order is ready to deliver"
+	resp.Message = "Products successfully handed over to the customer."
 
 	utils.WriteJSON(w, http.StatusOK, resp)
 }
 
 // CancelOrder
 func (o *OrderHandler) CancelOrder(w http.ResponseWriter, r *http.Request) {
+	// Read branch id
+	branchID := utils.GetBranchID(r)
+	if branchID == 0 {
+		o.errorLog.Println("ERROR_01_CancelOrder: Branch id not found")
+		utils.BadRequest(w, errors.New("Branch ID not found. Please include 'X-Branch-ID' header, e.g., X-Branch-ID: 1"))
+		return
+	}
+
 	orderIDStr := r.URL.Query().Get("order_id")
 	orderID, err := strconv.ParseInt(orderIDStr, 10, 64)
 	if err != nil {
-		o.errorLog.Println("ERROR_01_CancelOrder: invalid order ID", err)
+		o.errorLog.Println("ERROR_02_CancelOrder: invalid order ID", err)
 		utils.BadRequest(w, err)
 		return
 	}
 
-	err = o.DB.CancelOrder(r.Context(), orderID)
+	err = o.DB.CancelOrder(r.Context(), orderID, branchID)
 	if err != nil {
-		o.errorLog.Println("ERROR_02_CancelOrder: ", err)
+		o.errorLog.Println("ERROR_03_CancelOrder: ", err)
 		utils.BadRequest(w, err)
 		return
 	}
@@ -246,14 +275,20 @@ func (o *OrderHandler) ListOrdersWithFilter(w http.ResponseWriter, r *http.Reque
 	if salesManIDStr != "" {
 		id, err := strconv.ParseInt(salesManIDStr, 10, 64)
 		if err != nil {
-			o.errorLog.Println("ERROR_02_ListOrdersWithFilter: invalid salesManID", err)
+			o.errorLog.Println("ERROR_02_ListOrdersWithFilter: invalid salespersonID", err)
 			utils.BadRequest(w, err)
 			return
 		}
 		salesManID = &id
 	}
-
-	orders, err := o.DB.ListOrdersWithItems(r.Context(), customerID, salesManID)
+	//read branch id
+	branchID := utils.GetBranchID(r)
+	if branchID == 0 {
+		o.errorLog.Println("ERROR_03_ListOrdersWithFilter: Branch id not found")
+		utils.BadRequest(w, errors.New("Branch ID not found. Please include 'X-Branch-ID' header, e.g., X-Branch-ID: 1"))
+		return
+	}
+	orders, err := o.DB.ListOrdersWithItems(r.Context(), customerID, salesManID, branchID)
 	if err != nil {
 		o.errorLog.Println("ERROR_03_ListOrdersWithFilter: ", err)
 		utils.BadRequest(w, err)
@@ -282,8 +317,14 @@ func (o *OrderHandler) ListOrdersPaginatedHandler(w http.ResponseWriter, r *http
 	if pageLength == 0 {
 		pageLength = 10
 	}
-
-	orders, err := o.DB.ListOrdersPaginated(r.Context(), pageNo, pageLength, status, sortByDate)
+	//read branch id
+	branchID := utils.GetBranchID(r)
+	if branchID == 0 {
+		o.errorLog.Println("ERROR_01_ListOrdersPaginatedHandler: Branch id not found")
+		utils.BadRequest(w, errors.New("Branch ID not found. Please include 'X-Branch-ID' header, e.g., X-Branch-ID: 1"))
+		return
+	}
+	orders, err := o.DB.ListOrdersPaginated(r.Context(), pageNo, pageLength, status, sortByDate, branchID)
 	if err != nil {
 		o.errorLog.Println("ERROR_01_ListOrdersPaginated: ", err)
 		utils.BadRequest(w, err)
@@ -304,8 +345,14 @@ func (o *OrderHandler) ListOrdersByStatusHandler(w http.ResponseWriter, r *http.
 		utils.BadRequest(w, errors.New("status query param required"))
 		return
 	}
-
-	orders, err := o.DB.ListOrdersByStatus(r.Context(), status)
+	//read branch id
+	branchID := utils.GetBranchID(r)
+	if branchID == 0 {
+		o.errorLog.Println("ERROR_01_ListOrdersByStatusHandler: Branch id not found")
+		utils.BadRequest(w, errors.New("Branch ID not found. Please include 'X-Branch-ID' header, e.g., X-Branch-ID: 1"))
+		return
+	}
+	orders, err := o.DB.ListOrdersByStatus(r.Context(), status, branchID)
 	if err != nil {
 		o.errorLog.Println("ERROR_01_ListOrdersByStatus: ", err)
 		utils.BadRequest(w, err)
@@ -332,7 +379,14 @@ func (o *OrderHandler) GetOrderSummaryHandler(w http.ResponseWriter, r *http.Req
 		return
 	}
 
-	summary, err := o.DB.GetOrderSummary(r.Context(), startDate, endDate)
+	//read branch id
+	branchID := utils.GetBranchID(r)
+	if branchID == 0 {
+		o.errorLog.Println("ERROR_01_GetOrderSummaryHandler: Branch id not found")
+		utils.BadRequest(w, errors.New("Branch ID not found. Please include 'X-Branch-ID' header, e.g., X-Branch-ID: 1"))
+		return
+	}
+	summary, err := o.DB.GetOrderSummary(r.Context(), startDate, endDate, branchID)
 	if err != nil {
 		o.errorLog.Println("ERROR_01_GetOrderSummaryHandler: ", err)
 		utils.BadRequest(w, err)

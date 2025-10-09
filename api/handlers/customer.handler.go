@@ -32,13 +32,23 @@ func NewCustomerHandler(db *dbrepo.CustomerRepo, infoLog *log.Logger, errorLog *
 func (c *CustomerHandler) AddCustomer(w http.ResponseWriter, r *http.Request) {
 	var customer models.Customer
 	if err := utils.ReadJSON(w, r, &customer); err != nil {
-		c.errorLog.Println("ERROR_01_AddCustomer:", err)
+		c.errorLog.Println("ERROR_02_AddCustomer:", err)
 		utils.BadRequest(w, err)
 		return
 	}
 
+	//read branch id
+	branchID := utils.GetBranchID(r)
+	if branchID == 0 {
+		c.errorLog.Println("ERROR_01_AddCustomer: Branch id not found")
+		utils.BadRequest(w, errors.New("Branch ID not found. Please include 'X-Branch-ID' header, e.g., X-Branch-ID: 1"))
+		return
+	}
+
+	customer.BranchID = branchID
+
 	if err := c.DB.CreateNewCustomer(r.Context(), &customer); err != nil {
-		c.errorLog.Println("ERROR_02_AddCustomer:", err)
+		c.errorLog.Println("ERROR_03_AddCustomer:", err)
 		utils.BadRequest(w, err)
 		return
 	}
@@ -254,16 +264,22 @@ func (c *CustomerHandler) GetCustomerByTaxID(w http.ResponseWriter, r *http.Requ
 }
 
 // FilterCustomersByName handles filtering customers by name (query param)
-func (h *CustomerHandler) FilterCustomersByName(w http.ResponseWriter, r *http.Request) {
+func (c *CustomerHandler) FilterCustomersByName(w http.ResponseWriter, r *http.Request) {
 	name := r.URL.Query().Get("name")
 	if name == "" {
 		utils.BadRequest(w, fmt.Errorf("missing required query param: name"))
 		return
 	}
-
-	customers, err := h.DB.FilterCustomersByName(r.Context(), name)
+	//read branch id
+	branchID := utils.GetBranchID(r)
+	if branchID == 0 {
+		c.errorLog.Println("ERROR_01_AddCustomer: Branch id not found")
+		utils.BadRequest(w, errors.New("Branch ID not found. Please include 'X-Branch-ID' header, e.g., X-Branch-ID: 1"))
+		return
+	}
+	customers, err := c.DB.FilterCustomersByName(r.Context(), branchID, name)
 	if err != nil {
-		h.errorLog.Println("ERROR_01_FilterCustomersByName:", err)
+		c.errorLog.Println("ERROR_01_FilterCustomersByName:", err)
 		utils.ServerError(w, err)
 		return
 	}
@@ -314,24 +330,15 @@ func (c *CustomerHandler) GetCustomers(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-
-	// If status is given, parse to bool
-	// var statusFilter *bool
-	// if statusStr != "" {
-	// 	if statusStr == "active" {
-	// 		tmp := true
-	// 		statusFilter = &tmp
-	// 	} else if statusStr == "inactive" {
-	// 		tmp := false
-	// 		statusFilter = &tmp
-	// 	} else {
-	// 		utils.BadRequest(w, errors.New("status must be 'active' or 'inactive'"))
-	// 		return
-	// 	}
-	// }
-
+	//read branch id
+	branchID := utils.GetBranchID(r)
+	if branchID == 0 {
+		c.errorLog.Println("ERROR_01_AddCustomer: Branch id not found")
+		utils.BadRequest(w, errors.New("Branch ID not found. Please include 'X-Branch-ID' header, e.g., X-Branch-ID: 1"))
+		return
+	}
 	// Call DB repo
-	customers, err := c.DB.GetCustomers(r.Context(), page, limit /* optionally add statusFilter if repo supports */)
+	customers, err := c.DB.GetCustomers(r.Context(), page, limit, branchID)
 	if err != nil {
 		c.errorLog.Println("ERROR_01_GetCustomers:", err)
 		utils.ServerError(w, err)
@@ -360,10 +367,17 @@ func (c *CustomerHandler) GetCustomers(w http.ResponseWriter, r *http.Request) {
 	utils.WriteJSON(w, http.StatusOK, resp)
 }
 
-func (h *CustomerHandler) GetCustomersNameAndID(w http.ResponseWriter, r *http.Request) {
-	customers, err := h.DB.GetCustomersNameAndID(r.Context())
+func (c *CustomerHandler) GetCustomersNameAndID(w http.ResponseWriter, r *http.Request) {
+	//read branch id
+	branchID := utils.GetBranchID(r)
+	if branchID == 0 {
+		c.errorLog.Println("ERROR_01_AddCustomer: Branch id not found")
+		utils.BadRequest(w, errors.New("Branch ID not found. Please include 'X-Branch-ID' header, e.g., X-Branch-ID: 1"))
+		return
+	}
+	customers, err := c.DB.GetCustomersNameAndID(r.Context(), branchID)
 	if err != nil {
-		h.errorLog.Println("ERROR_01_GetCustomersNameAndID:", err)
+		c.errorLog.Println("ERROR_01_GetCustomersNameAndID:", err)
 		utils.ServerError(w, err)
 		return
 	}
@@ -389,7 +403,14 @@ func (h *CustomerHandler) GetCustomersNameAndID(w http.ResponseWriter, r *http.R
 }
 
 func (c *CustomerHandler) GetCustomersWithDueHandler(w http.ResponseWriter, r *http.Request) {
-	customers, err := c.DB.GetCustomersWithDue(r.Context())
+	//read branch id
+	branchID := utils.GetBranchID(r)
+	if branchID == 0 {
+		c.errorLog.Println("ERROR_01_AddCustomer: Branch id not found")
+		utils.BadRequest(w, errors.New("Branch ID not found. Please include 'X-Branch-ID' header, e.g., X-Branch-ID: 1"))
+		return
+	}
+	customers, err := c.DB.GetCustomersWithDue(r.Context(), branchID)
 	if err != nil {
 		c.errorLog.Println("ERROR_01_GetCustomersWithDueHandler:", err)
 		utils.BadRequest(w, err)

@@ -15,12 +15,13 @@ func NewAccountRepo(db *pgxpool.Pool) *AccountRepo {
 	return &AccountRepo{db: db}
 }
 
-func (a *AccountRepo)GetAccounts(ctx context.Context) ([]*models.Account, error) {
+func (a *AccountRepo) GetAccounts(ctx context.Context, branchID int64) ([]*models.Account, error) {
 	rows, err := a.db.Query(ctx, `
-        SELECT id, name, type, current_balance, created_at, updated_at
+        SELECT id, name, type, current_balance, branch_id, created_at, updated_at
         FROM accounts
+		WHERE branch_id = $1
         ORDER BY id
-    `)
+    `, branchID)
 	if err != nil {
 		return nil, err
 	}
@@ -29,7 +30,7 @@ func (a *AccountRepo)GetAccounts(ctx context.Context) ([]*models.Account, error)
 	var accounts []*models.Account
 	for rows.Next() {
 		var a models.Account
-		if err := rows.Scan(&a.ID, &a.Name, &a.Type, &a.CurrentBalance, &a.CreatedAt, &a.UpdatedAt); err != nil {
+		if err := rows.Scan(&a.ID, &a.Name, &a.Type, &a.CurrentBalance, &a.BranchID, &a.CreatedAt, &a.UpdatedAt); err != nil {
 			return nil, err
 		}
 		accounts = append(accounts, &a)
@@ -38,12 +39,13 @@ func (a *AccountRepo)GetAccounts(ctx context.Context) ([]*models.Account, error)
 	return accounts, nil
 }
 
-func (a *AccountRepo)GetAccountsNames(ctx context.Context) ([]*models.AccountNameID, error) {
+func (a *AccountRepo) GetAccountsNames(ctx context.Context, branchID int64) ([]*models.AccountNameID, error) {
 	rows, err := a.db.Query(ctx, `
         SELECT id, name
         FROM accounts
+		WHERE branch_id=$1
         ORDER BY id
-    `)
+    `, branchID)
 	if err != nil {
 		return nil, err
 	}

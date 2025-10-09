@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"time"
 
 	"os"
 
@@ -40,6 +41,15 @@ func NewEmployeeHandler(db *dbrepo.EmployeeRepo, infoLog *log.Logger, errorLog *
 	}
 }
 func (e *EmployeeHandler) AddEmployee(w http.ResponseWriter, r *http.Request) {
+
+	//read branch id
+	branchID := utils.GetBranchID(r)
+	if branchID == 0 {
+		e.errorLog.Println("Branch id not found")
+		utils.BadRequest(w, errors.New("Branch ID not found. Please include 'X-Branch-ID' header, e.g., X-Branch-ID: 1"))
+		return
+	}
+
 	var employeeDetails models.Employee
 	err := utils.ReadJSON(w, r, &employeeDetails)
 
@@ -48,7 +58,8 @@ func (e *EmployeeHandler) AddEmployee(w http.ResponseWriter, r *http.Request) {
 		utils.BadRequest(w, err)
 		return
 	}
-
+	//set branch id
+	employeeDetails.BranchID = branchID
 	// Hash a password
 	hashed, err := utils.HashPassword(employeeDetails.Password)
 	if err != nil {
@@ -108,7 +119,14 @@ func (e *EmployeeHandler) GetEmployeeByID(w http.ResponseWriter, r *http.Request
 	utils.WriteJSON(w, 200, resp)
 }
 func (e *EmployeeHandler) GetEmployeesNameAndID(w http.ResponseWriter, r *http.Request) {
-	//TODO: extract branch id from url
+	//read branch id
+	branchID := utils.GetBranchID(r)
+	if branchID == 0 {
+		e.errorLog.Println("Branch id not found")
+		utils.BadRequest(w, errors.New("Branch ID not found. Please include 'X-Branch-ID' header, e.g., X-Branch-ID: 1"))
+		return
+	}
+
 	employeeRole := strings.TrimSpace(r.URL.Query().Get("role"))
 
 	if _, found := RoleMap[employeeRole]; !found {
@@ -116,7 +134,7 @@ func (e *EmployeeHandler) GetEmployeesNameAndID(w http.ResponseWriter, r *http.R
 		utils.BadRequest(w, errors.New("Please provide correct role, allowed-role:[chairman, manager, salesperson, worker]"))
 		return
 	}
-	employees, err := e.DB.GetEmployeesNameAndIDByBranchAndRole(r.Context(), 1, employeeRole)
+	employees, err := e.DB.GetEmployeesNameAndIDByBranchAndRole(r.Context(), branchID, employeeRole)
 	var resp struct {
 		Error     bool                     `json:"error"`
 		Status    string                   `json:"status"`
@@ -218,6 +236,55 @@ func (e *EmployeeHandler) UpdateEmployeeSalary(w http.ResponseWriter, r *http.Re
 	utils.WriteJSON(w, http.StatusOK, resp)
 }
 
+// SubmitSalary generate and give employee salary
+func (e *EmployeeHandler) SubmitSalary(w http.ResponseWriter, r *http.Request) {
+	var salary struct {
+		EmployeeID int64     `json:"employee_id"`
+		Amount     float64   `json:"salary_amount"`
+		SalaryDate time.Time `json:"salary_date"`
+	}
+	err := utils.ReadJSON(w, r, &salary)
+	if err != nil {
+		e.errorLog.Println("ERROR_01_SubmitSalary", err)
+		utils.BadRequest(w, err)
+		return
+	}
+	e.infoLog.Println(salary)
+	if salary.EmployeeID == 0 {
+		e.errorLog.Println("ERROR_02_SubmitSalary: Missing employee ID")
+		utils.BadRequest(w, errors.New("missing employee ID"))
+		return
+	}
+
+	branchID := utils.GetBranchID(r)
+	if branchID == 0 {
+		e.errorLog.Println("ERROR_03_SubmitSalary: Missing branch ID")
+		utils.BadRequest(w, errors.New("missing branch ID"))
+		return
+	}
+
+	err = e.DB.SubmitSalary(r.Context(), salary.SalaryDate, salary.EmployeeID, branchID, salary.Amount)
+	if err != nil {
+		e.errorLog.Println("ERROR_04_SubmitSalary: ", err)
+		if errors.Is(err, pgx.ErrNoRows) {
+			utils.BadRequest(w, errors.New("Invalid user id"))
+		} else {
+			utils.BadRequest(w, err)
+		}
+		return
+	}
+
+	var resp struct {
+		Error   bool   `json:"error"`
+		Status  string `json:"status"`
+		Message string `json:"message"`
+	}
+	resp.Error = false
+	resp.Status = "success"
+	resp.Message = "Employee salary updated successfully"
+	utils.WriteJSON(w, http.StatusOK, resp)
+}
+
 // UpdateEmployeeRole updates employee role and status
 func (e *EmployeeHandler) UpdateEmployeeRole(w http.ResponseWriter, r *http.Request) {
 	var employeeDetails models.Employee
@@ -259,8 +326,6 @@ func (e *EmployeeHandler) UpdateEmployeeRole(w http.ResponseWriter, r *http.Requ
 // Supports query params: page, limit, role, status
 func (e *EmployeeHandler) PaginatedEmployeeList(w http.ResponseWriter, r *http.Request) {
 
-	//TODO: extract branch id from url
-	branchParam := ""
 	// Extract query params
 	pageParam := strings.TrimSpace(r.URL.Query().Get("page"))
 	limitParam := strings.TrimSpace(r.URL.Query().Get("limit"))
@@ -270,7 +335,8 @@ func (e *EmployeeHandler) PaginatedEmployeeList(w http.ResponseWriter, r *http.R
 	// Defaults
 	page := 0 // 0 means list all
 	limit := 0
-	branchID := int64(1)
+	//read branch id
+	branchID := utils.GetBranchID(r)
 
 	// Parse page param
 	if pageParam != "" {
@@ -294,19 +360,9 @@ func (e *EmployeeHandler) PaginatedEmployeeList(w http.ResponseWriter, r *http.R
 		}
 	}
 
-	// Parse branch_id param
-	if branchParam != "" {
-		if bID, err := strconv.ParseInt(branchParam, 10, 64); err == nil && bID > 0 {
-			branchID = bID
-		} else {
-			e.errorLog.Println("ERROR_04_PaginatedEmployeeList: Invalid branch_id")
-			utils.BadRequest(w, errors.New("ERROR_04_PaginatedEmployeeList: Invalid branch_id"))
-			return
-		}
-	}
 	// Check role param
 	if _, found := RoleMap[roleFilter]; !found {
-		e.errorLog.Println("ERROR_01_GetEmployeesNameAndID: Invalid role, allowed-role:[chairman, manager, salesperson, worker]")
+		e.errorLog.Println("ERROR_03_PaginatedEmployeeList: Invalid role, allowed-role:[chairman, manager, salesperson, worker]")
 		utils.BadRequest(w, errors.New("Please provide correct role, allowed-role:[chairman, manager, salesperson, worker]"))
 		return
 	}
@@ -324,7 +380,7 @@ func (e *EmployeeHandler) PaginatedEmployeeList(w http.ResponseWriter, r *http.R
 	// Fetch filtered employees from DB
 	employees, total, err := e.DB.PaginatedEmployeeList(r.Context(), page, limit, branchID, roleFilter, statusFilter, sortBy, sortOrder)
 	if err != nil {
-		e.errorLog.Println("ERROR_03_PaginatedEmployeeList: ", err)
+		e.errorLog.Println("ERROR_04_PaginatedEmployeeList: ", err)
 		utils.BadRequest(w, err)
 		return
 	}

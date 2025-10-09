@@ -1,6 +1,7 @@
 package api
 
 import (
+	"errors"
 	"log"
 	"net/http"
 
@@ -24,7 +25,14 @@ func NewAccountHandler(db *dbrepo.AccountRepo, infoLog *log.Logger, errorLog *lo
 }
 
 func (a *AccountHandler) GetAccountsHandler(w http.ResponseWriter, r *http.Request) {
-	accounts, err := a.DB.GetAccounts(r.Context())
+	//read branch id
+	branchID := utils.GetBranchID(r)
+	if branchID == 0 {
+		a.errorLog.Println("ERROR_01_GetAccountsHandler: Branch id not found")
+		utils.BadRequest(w, errors.New("Branch ID not found. Please include 'X-Branch-ID' header, e.g., X-Branch-ID: 1"))
+		return
+	}
+	accounts, err := a.DB.GetAccounts(r.Context(), branchID)
 	if err != nil {
 		http.Error(w, "Failed to fetch accounts", http.StatusInternalServerError)
 		return
@@ -44,7 +52,14 @@ func (a *AccountHandler) GetAccountsHandler(w http.ResponseWriter, r *http.Reque
 
 }
 func (a *AccountHandler) GetAccountNamesHandler(w http.ResponseWriter, r *http.Request) {
-	accounts, err := a.DB.GetAccountsNames(r.Context())
+	//read branch id
+	branchID := utils.GetBranchID(r)
+	if branchID == 0 {
+		a.errorLog.Println("ERROR_01_GetAccountNamesHandler: Branch id not found")
+		utils.BadRequest(w, errors.New("Branch ID not found. Please include 'X-Branch-ID' header, e.g., X-Branch-ID: 1"))
+		return
+	}
+	accounts, err := a.DB.GetAccountsNames(r.Context(), branchID)
 	if err != nil {
 		http.Error(w, "Failed to fetch accounts", http.StatusInternalServerError)
 		return

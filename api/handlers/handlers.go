@@ -17,6 +17,8 @@ type HandlerRepo struct {
 	Account *AccountHandler
 	Product *ProductHandler
 	Report *ReportHandler
+	Supplier *SupplierHandler
+	Purchase *PurchaseHandler
 }
 
 func NewHandlerRepo( db *dbrepo.DBRepository,JWT models.JWTConfig, infoLog *log.Logger, errorLog *log.Logger) *HandlerRepo {
@@ -30,5 +32,7 @@ func NewHandlerRepo( db *dbrepo.DBRepository,JWT models.JWTConfig, infoLog *log.
 		Account: NewAccountHandler(db.AccountRepo,infoLog,errorLog),
 		Product: NewProductHandler(db.ProductRepo, infoLog, errorLog),
 		Report: NewReportHandler(db.ReportRepo, infoLog, errorLog),
+		Supplier: NewSupplierHandler(db.SupplierRepo, infoLog, errorLog),
+		Purchase: NewPurchaseHandler(db.PurchaseRepo, infoLog, errorLog),
 	}
 }

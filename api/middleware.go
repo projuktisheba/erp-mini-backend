@@ -143,7 +143,7 @@ func HasAccess(userRole, required Role) bool {
 	case RoleManager:
 		return userRole == RoleAdmin || userRole == RoleManager
 	case RoleEmployee:
-		return true
+		return false
 	default:
 		return false
 	}
@@ -171,7 +171,6 @@ func (app *application) RequireRole(required Role) func(next http.Handler) http.
 				})
 				return
 			}
-
 			next.ServeHTTP(w, r)
 		})
 	}

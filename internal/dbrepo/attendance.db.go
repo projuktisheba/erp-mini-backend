@@ -23,29 +23,64 @@ func NewAttendanceRepo(db *pgxpool.Pool) *AttendanceRepo {
 
 // ----------------- SINGLE UPDATE -----------------
 
-func (a *AttendanceRepo) UpdateTodayAttendance(ctx context.Context, employeeAttendance models.Attendance) error {
-	// Insert or update in DB
+func (a *AttendanceRepo) UpdateTodayAttendance(ctx context.Context, branchID int64, employeeAttendance models.Attendance) error {
+	tx, err := a.db.Begin(ctx)
+	if err != nil {
+		return fmt.Errorf("begin tx: %w", err)
+	}
+	defer tx.Rollback(ctx) // will rollback if not committed
+
+	// Insert or update in attendance table
 	query := `
-		INSERT INTO attendance (employee_id, work_date, status, overtime_hours)
-		VALUES ($1, $2, $3, $4)
+		INSERT INTO attendance (
+    		employee_id, work_date, branch_id, status, advance_payment, overtime_hours, production_units
+		)
+		VALUES ($1, $2, $3, $4, $5, $6, $7)
 		ON CONFLICT (employee_id, work_date)
-		DO UPDATE SET status = EXCLUDED.status,
-					  overtime_hours = EXCLUDED.overtime_hours,
-					  updated_at = CURRENT_TIMESTAMP;
+		DO UPDATE SET 
+			status          = EXCLUDED.status,  -- replace status
+			advance_payment = attendance.advance_payment + EXCLUDED.advance_payment,
+			overtime_hours  = attendance.overtime_hours + EXCLUDED.overtime_hours,
+			production_units = attendance.production_units + EXCLUDED.production_units,
+			updated_at      = CURRENT_TIMESTAMP;
+
 	`
 
-	_, err := a.db.Exec(ctx, query,
+	_, err = tx.Exec(ctx, query,
 		employeeAttendance.EmployeeID,
 		employeeAttendance.WorkDate,
+		branchID,
 		employeeAttendance.Status,
+		employeeAttendance.AdvancePayment,
 		employeeAttendance.OvertimeHours,
+		employeeAttendance.ProductionUnits,
 	)
+	if err != nil {
+		return fmt.Errorf("insert/update attendance: %w", err)
+	}
 
-	return err
+	//increment expense
+	// Update top_sheet inside the same tx
+	topSheet := &models.TopSheet{
+		Date: employeeAttendance.WorkDate,
+		BranchID:  branchID,
+		Expense: float64(employeeAttendance.AdvancePayment),
+	}
+	err = SaveTopSheetTx(tx, ctx, topSheet) // <-- must accept tx, not db
+	if err != nil {
+		return fmt.Errorf("save topsheet: %w", err)
+	}
+
+	// Commit if all succeeded
+	if err := tx.Commit(ctx); err != nil {
+		return fmt.Errorf("commit tx: %w", err)
+	}
+
+	return nil
 }
 
 // ----------------- BATCH UPDATE -----------------
-func (a *AttendanceRepo) BatchUpdateTodayAttendance(ctx context.Context, entries []*models.Attendance) error {
+func (a *AttendanceRepo) BatchUpdateTodayAttendance(ctx context.Context, branchID int64, entries []*models.Attendance) error {
 	if len(entries) == 0 {
 		return nil
 	}
@@ -53,13 +88,21 @@ func (a *AttendanceRepo) BatchUpdateTodayAttendance(ctx context.Context, entries
 	batch := &pgx.Batch{}
 	for _, e := range entries {
 		batch.Queue(`
-			INSERT INTO attendance (employee_id, work_date, status, overtime_hours)
-			VALUES ($1, $2, $3, $4)
+			INSERT INTO attendance (employee_id, work_date, branch_id, status, advance_payment, overtime_hours, production_units)
+			VALUES ($1, $2, $3, $4, $5, $6, $7)
 			ON CONFLICT (employee_id, work_date)
 			DO UPDATE SET status = EXCLUDED.status,
-						  overtime_hours = EXCLUDED.overtime_hours,
-						  updated_at = CURRENT_TIMESTAMP;
-		`, e.EmployeeID, e.WorkDate, e.Status, e.OvertimeHours)
+						advance_payment = EXCLUDED.advance_payment,
+						overtime_hours = EXCLUDED.overtime_hours,
+						production_units = EXCLUDED.production_units,
+						updated_at = CURRENT_TIMESTAMP;
+		`, e.EmployeeID,
+			e.WorkDate,
+			branchID,
+			e.Status,
+			e.AdvancePayment,
+			e.OvertimeHours,
+			e.ProductionUnits)
 	}
 
 	br := a.db.SendBatch(ctx, batch)
@@ -95,7 +138,7 @@ func (a *AttendanceRepo) GetEmployeeCalendar(ctx context.Context, employeeIDStr,
 		}
 
 		query = `
-			SELECT a.id, a.employee_id, e.fname || ' ' || e.lname AS employee_name,
+			SELECT a.id, a.employee_id, e.name AS employee_name,
 				   a.work_date, a.status, a.overtime_hours,
 				   a.created_at, a.updated_at
 			FROM attendance a
@@ -121,7 +164,7 @@ func (a *AttendanceRepo) GetEmployeeCalendar(ctx context.Context, employeeIDStr,
 		}
 
 		query = `
-			SELECT a.id, a.employee_id, e.fname || ' ' || e.lname AS employee_name,
+			SELECT a.id, a.employee_id, e.name AS employee_name,
 				   a.work_date, a.status, a.overtime_hours,
 				   a.created_at, a.updated_at
 			FROM attendance a
@@ -137,7 +180,7 @@ func (a *AttendanceRepo) GetEmployeeCalendar(ctx context.Context, employeeIDStr,
 
 	} else {
 		query = `
-			SELECT a.id, a.employee_id, e.fname || ' ' || e.lname AS employee_name,
+			SELECT a.id, a.employee_id, e.name AS employee_name,
 				   a.work_date, a.status, a.overtime_hours,
 				   a.created_at, a.updated_at
 			FROM attendance a
@@ -193,9 +236,9 @@ func (a *AttendanceRepo) GetEmployeeCalendar(ctx context.Context, employeeIDStr,
 
 // ----------------- SUMMARY -----------------
 
-func (a *AttendanceRepo) GetEmployeeSummary(ctx context.Context, employeeID string, month string) (*models.AttendanceSummary, error) {
+func (a *AttendanceRepo) GetEmployeeSummary(ctx context.Context, employeeID string, branchID int64, month string) (*models.AttendanceSummary, error) {
 	query := `
-		SELECT a.employee_id, e.fname || ' ' || e.lname AS employee_name,
+		SELECT a.employee_id, e.name AS employee_name,
 		       COUNT(*) FILTER (WHERE a.status = 'Present') AS present_days,
 		       COUNT(*) FILTER (WHERE a.status = 'Absent') AS absent_days,
 		       COUNT(*) FILTER (WHERE a.status = 'Leave') AS leave_days,
@@ -203,13 +246,13 @@ func (a *AttendanceRepo) GetEmployeeSummary(ctx context.Context, employeeID stri
 		       COALESCE(SUM(a.overtime_hours), 0) AS total_overtime_hours
 		FROM attendance a
 		JOIN employees e ON e.id = a.employee_id
-		WHERE a.employee_id = $1
+		WHERE a.employee_id = $1 AND a.branch_id = $2
 		  AND DATE_TRUNC('month', a.work_date) = DATE_TRUNC('month', TO_DATE($2, 'YYYY-MM'))
-		GROUP BY a.employee_id, e.fname, e.lname;
+		GROUP BY a.employee_id, e.name;
 	`
 
 	var s models.AttendanceSummary
-	err := a.db.QueryRow(ctx, query, employeeID, month).Scan(
+	err := a.db.QueryRow(ctx, query, employeeID, branchID, month).Scan(
 		&s.EmployeeID, &s.EmployeeName, &s.PresentDays,
 		&s.AbsentDays, &s.LeaveDays, &s.TotalWorkingDays, &s.TotalOvertimeHours,
 	)
@@ -219,14 +262,14 @@ func (a *AttendanceRepo) GetEmployeeSummary(ctx context.Context, employeeID stri
 	return &s, nil
 }
 
-func (a *AttendanceRepo) GetBatchSummary(ctx context.Context, month, start, end string) ([]models.AttendanceSummary, error) {
+func (a *AttendanceRepo) GetBatchSummary(ctx context.Context, month, start, end string, branchID int64) ([]models.AttendanceSummary, error) {
 	var query string
 	var rows pgx.Rows
 	var err error
 
 	if month != "" {
 		query = `
-			SELECT a.employee_id, e.fname || ' ' || e.lname AS employee_name,
+			SELECT a.employee_id, e.name AS employee_name,
 			       COUNT(*) FILTER (WHERE a.status = 'Present') AS present_days,
 			       COUNT(*) FILTER (WHERE a.status = 'Absent') AS absent_days,
 			       COUNT(*) FILTER (WHERE a.status = 'Leave') AS leave_days,
@@ -241,7 +284,7 @@ func (a *AttendanceRepo) GetBatchSummary(ctx context.Context, month, start, end 
 		rows, err = a.db.Query(ctx, query, month)
 	} else if start != "" && end != "" {
 		query = `
-			SELECT a.employee_id, e.fname || ' ' || e.lname AS employee_name,
+			SELECT a.employee_id, e.name AS employee_name,
 			       COUNT(*) FILTER (WHERE a.status = 'Present') AS present_days,
 			       COUNT(*) FILTER (WHERE a.status = 'Absent') AS absent_days,
 			       COUNT(*) FILTER (WHERE a.status = 'Leave') AS leave_days,

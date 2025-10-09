@@ -3,7 +3,7 @@
 # -----------------------------
 # Configuration
 # -----------------------------
-VPS_HOST="192.250.228.113"
+VPS_HOST="203.161.48.179"
 REMOTE_PATH="/home/samiul/apps/bin/main-erp-mini-backend"
 SERVICE_NAME="erpminiapi.service"
 PING_URL="https://api.erp.pssoft.xyz/ping"

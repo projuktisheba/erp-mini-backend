@@ -17,7 +17,7 @@ func (app *application) routes() http.Handler {
 	mux.Use(cors.Handler(cors.Options{
 		AllowedOrigins:   []string{"*"},
 		AllowedMethods:   []string{"GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"},
-		AllowedHeaders:   []string{"Accept", "Authorization", "Content-Type", "X-CSRF-Token"},
+		AllowedHeaders:   []string{"Accept", "Authorization", "Content-Type", "X-CSRF-Token", "X-Branch-ID"},
 		AllowCredentials: false,
 		MaxAge:           300,
 	}))
@@ -87,12 +87,17 @@ func (app *application) routes() http.Handler {
 		// Body (JSON): { id, base_salary, overtime_rate }
 		r.Put("/employee/salary", app.Handlers.Employee.UpdateEmployeeSalary)
 
+		// Generate and give employee salary
+		// Example: POST /api/v1/hry/employee/salary/submit
+		// Body (JSON): { id, salary_amount}
+		r.Post("/employee/salary/submit", app.Handlers.Employee.SubmitSalary)
+
 		// Update employee role and status (Admin only)
 		// Example: PUT /api/v1/hr/employee/role
 		// Body (JSON): { id, role, status }
 		r.Put("/employee/role", app.Handlers.Employee.UpdateEmployeeRole)
-
 	})
+
 	// -------------------- attendance Routes --------------------
 	mux.Route("/api/v1/hr/attendance", func(r chi.Router) {
 		// r.Use(app.RequireRole(RoleManager))
@@ -120,8 +125,10 @@ func (app *application) routes() http.Handler {
 		// Example: GET /api/v1/hr/attendance/batch/summary?start=2025-09-01&end=2025-09-30
 		r.Get("/batch/summary", app.Handlers.Attendance.GetBatchSummary)
 	})
+
 	// -------------------- Customer Routes --------------------
 	mux.Route("/api/v1/mis", func(r chi.Router) {
+		// r.Use(app.RequireRole(RoleManager))
 		// Get single customer by id, mobile, or tax_id (query param)
 		// Example: GET /api/v1/mis/customer?id=5
 		// Example: GET /api/v1/mis/customer?mobile=017xxxxxxxx
@@ -164,13 +171,41 @@ func (app *application) routes() http.Handler {
 		// Example: GET /api/v1/mis/customers/with-due
 		r.Get("/customers/with-due", app.Handlers.Customer.GetCustomersWithDueHandler)
 
+
+		// Add a new supplier
+		// Example: POST /api/v1/hr/supplier
+		// Body (JSON): { name, status, mobile }
+		r.Post("/supplier", app.Handlers.Supplier.AddSupplier)
+
+		// Update supplier details
+		// Example: PUT /api/v1/hr/supplier
+		// Body (JSON): { id, name, status, mobile }
+		r.Put("/supplier", app.Handlers.Supplier.UpdateSupplier)
+
+		// Get a single supplier by ID
+		// Example: GET /api/v1/hr/supplier?id=5
+		r.Get("/supplier", app.Handlers.Supplier.GetSupplierByID)
+
+		// Search suppliers by name, status, or mobile with pagination
+		// Example: GET /api/v1/hr/suppliers?name=abc&status=active&mobile=0123456789&page=1&limit=20
+		r.Get("/suppliers", app.Handlers.Supplier.ListSuppliers)
+
 	})
+
 	// -------------------- Product Routes --------------------
 	mux.Route("/api/v1/products", func(r chi.Router) {
 		// r.Use(app.RequireRole(RoleManager))
 		// Get all products
 		// Example: GET /api/v1/products
 		r.Get("/", app.Handlers.Product.GetProductsHandler)
+	})
+
+	// -------------------- Inventory Routes ---------------
+	mux.Route("/api/v1/purchase", func(r chi.Router) {
+		r.Post("/", app.Handlers.Purchase.AddPurchase)
+
+		//GET /api/v1/purchase/list?memo_no=INV123&supplier_id=5&from_date=2025-09-01&to_date=2025-09-30&page=1&limit=20
+		r.Get("/list", app.Handlers.Purchase.ListPurchases)
 	})
 
 	// -------------------- Order Routes --------------------
@@ -197,7 +232,7 @@ func (app *application) routes() http.Handler {
 
 		// Update order status and payment amount from customer as mark the order as delivered
 		// Example: PATCH /api/v1/orders/delivery
-		// request body :{order_id, paid_amount}
+		// request body :{order_id, exit_date, paid_amount, paid_account_id}
 		r.Patch("/delivery", app.Handlers.Order.OrderDelivery)
 
 		// Get order details by ID
@@ -258,6 +293,17 @@ func (app *application) routes() http.Handler {
 		// Example: GET /api/v1/reports/dashboard/orders/overview?type=month&date=2025-09-01
 		// Note: Acceptable type [daily, weekly, monthly, yearly, all]
 		r.Get("/dashboard/orders/overview", app.Handlers.Report.GetOrderOverView)
+
+		// Employee progress report by id
+		// Example: GET /api/v1/reports/employee/progress?employee_id=1&start_date=2025-01-01&end_date=2025-03-31&report_type=daily
+		r.Get("/employee/progress", app.Handlers.Report.GetEmployeeProgressReport)
+		// worker progress report by id
+		// Example: GET /api/v1/reports/worker/progress?worker_id=1&start_date=2025-01-01&end_date=2025-03-31&report_type=daily
+		r.Get("/worker/progress", app.Handlers.Report.GetWorkerProgressReport)
+
+		// Branch monthly report
+		// Example: GET /api/v1/reports/branch?start_date=2025-01-01&end_date=2025-03-31&report_type=monthly
+		r.Get("/branch", app.Handlers.Report.GetBranchReport)
 	})
 
 	return mux

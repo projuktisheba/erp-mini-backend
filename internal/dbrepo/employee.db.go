@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"time"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
@@ -104,7 +105,6 @@ func (user *EmployeeRepo) GetEmployeeByUsernameOrMobile(ctx context.Context, use
 	return e, nil
 }
 
-
 // UpdateEmployee updates employee details
 func (r *EmployeeRepo) UpdateEmployee(ctx context.Context, e *models.Employee) error {
 	query := `
@@ -183,6 +183,81 @@ func (user *EmployeeRepo) UpdateEmployeeSalary(ctx context.Context, e *models.Em
 		e.OvertimeRate,
 		e.ID,
 	).Scan(&e.UpdatedAt)
+}
+
+// SubmitSalary generates and give employee salary
+// Call this function if the role of the token user is Admin
+func (user *EmployeeRepo) SubmitSalary(ctx context.Context, salaryDate time.Time, employeeID, branchID int64, amount float64) error {
+	//using pgxpool begin a transaction
+	tx, err := user.db.Begin(ctx)
+	if err != nil {
+		return fmt.Errorf("begin tx: %w", err)
+	}
+	defer tx.Rollback(ctx) // will rollback if not committed
+
+	// Insert or update in attendance table
+	query := `
+		INSERT INTO attendance (
+			employee_id, work_date, branch_id, status, advance_payment, overtime_hours, production_units
+		)
+		VALUES ($1, $2, $3, $4, $5, $6, $7)
+		ON CONFLICT (employee_id, work_date)
+		DO UPDATE SET 
+			status          = EXCLUDED.status,  -- replace status
+			advance_payment = attendance.advance_payment + EXCLUDED.advance_payment,
+			overtime_hours  = attendance.overtime_hours + EXCLUDED.overtime_hours,
+			production_units = attendance.production_units + EXCLUDED.production_units,
+			updated_at      = CURRENT_TIMESTAMP;
+
+	`
+
+	_, err = tx.Exec(ctx, query,
+		employeeID,
+		salaryDate,
+		branchID,
+		"Present",
+		amount,
+		0,
+		0,
+	)
+	if err != nil {
+		return fmt.Errorf("insert/update attendance: %w", err)
+	}
+
+	//increment expense
+	// Update top_sheet inside the same tx
+	topSheet := &models.TopSheet{
+		Date:     salaryDate,
+		BranchID: branchID,
+		Expense:  amount,
+	}
+	err = SaveTopSheetTx(tx, ctx, topSheet) // <-- must accept tx, not db
+	if err != nil {
+		return fmt.Errorf("save topsheet: %w", err)
+	}
+
+	//insert transaction
+	transaction := &models.Transaction{
+		BranchID:        branchID,
+		FromID:          branchID,
+		FromAccountName: "Branch",
+		FromType:        "Branch",
+		ToID:            employeeID,
+		ToAccountName:   "",
+		ToType:          "employees",
+		Amount:          amount,
+		TransactionType: "salary",
+		CreatedAt:       salaryDate,
+		Notes:           "Paying employee salary",
+	}
+	CreateTransactionTx(ctx, tx, transaction) // silently add transaction
+
+	// Commit if all succeeded
+	if err := tx.Commit(ctx); err != nil {
+		return fmt.Errorf("commit tx: %w", err)
+	}
+
+	return nil
 }
 
 // UpdateEmployeeStatus updates employee role and status
