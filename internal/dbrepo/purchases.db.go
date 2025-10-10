@@ -101,7 +101,6 @@ func (r *PurchaseRepo) CreatePurchase(ctx context.Context, p *models.Purchase) e
 	return nil
 }
 
-// ListPurchases lists purchases with dynamic filters, returning both supplier ID and name
 // ListPurchasesPaginated lists purchases with dynamic filters and pagination
 func (r *PurchaseRepo) ListPurchasesPaginated(
 	ctx context.Context,
@@ -128,7 +127,7 @@ func (r *PurchaseRepo) ListPurchasesPaginated(
 		JOIN suppliers s ON p.supplier_id = s.id
 	`
 
-	// Collect conditions dynamically
+	// Build dynamic WHERE conditions
 	var conditions []string
 	var args []interface{}
 	argPos := 1
@@ -159,26 +158,28 @@ func (r *PurchaseRepo) ListPurchasesPaginated(
 		argPos++
 	}
 
-	// Add WHERE clause if any conditions
 	whereClause := ""
 	if len(conditions) > 0 {
 		whereClause = " WHERE " + strings.Join(conditions, " AND ")
 	}
 
-	// Query total count
+	// COUNT query for total rows
 	countQuery := "SELECT COUNT(*) FROM purchase p JOIN suppliers s ON p.supplier_id = s.id" + whereClause
 	var total int
 	if err := r.db.QueryRow(ctx, countQuery, args...).Scan(&total); err != nil {
 		return nil, 0, fmt.Errorf("count purchases: %w", err)
 	}
 
+	query := baseQuery + whereClause + " ORDER BY p.purchase_date DESC"
 	// Add ORDER, LIMIT, OFFSET for pagination
-	offset := (pageNo - 1) * pageLen
-	baseQuery += whereClause + " ORDER BY p.purchase_date DESC"
-	baseQuery += fmt.Sprintf(" LIMIT %d OFFSET %d", pageLen, offset)
+	if pageLen > 0 && pageNo > 0 {
+		offset := (pageNo - 1) * pageLen
+
+		query += fmt.Sprintf(" LIMIT %d OFFSET %d", pageLen, offset)
+	}
 
 	// Execute final query
-	rows, err := r.db.Query(ctx, baseQuery, args...)
+	rows, err := r.db.Query(ctx, query, args...)
 	if err != nil {
 		return nil, 0, fmt.Errorf("list purchases: %w", err)
 	}
@@ -199,7 +200,7 @@ func (r *PurchaseRepo) ListPurchasesPaginated(
 			&p.CreatedAt,
 			&p.UpdatedAt,
 		); err != nil {
-			return nil, 0, err
+			return nil, 0, fmt.Errorf("scan purchase: %w", err)
 		}
 		purchases = append(purchases, p)
 	}

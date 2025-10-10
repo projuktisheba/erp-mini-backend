@@ -125,10 +125,13 @@ type Customer struct {
 	UpdatedAt    time.Time `json:"updated_at"`
 }
 
+
+
 // CustomerNameID is a lightweight struct for fetching only customer's ID and Name.
 type CustomerNameID struct {
 	ID   int64  `json:"id"`
 	Name string `json:"name"`
+	Mobile string `json:"mobile"`
 }
 
 type Attendance struct {

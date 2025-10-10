@@ -100,8 +100,7 @@ func (r *SupplierRepo) GetSupplierByID(ctx context.Context, id int64) (*models.S
 	return s, nil
 }
 
-// ListSuppliers allows filtering suppliers by name, status, or mobile with pagination
-func (r *SupplierRepo) ListSuppliers(ctx context.Context, name, status, mobile string, limit, offset int, branchID int64) ([]*models.Supplier, int, error) {
+func (r *SupplierRepo) ListSuppliers(ctx context.Context, name, status, mobile string, page, limit int, branchID int64) ([]*models.Supplier, int, error) {
 	baseQuery := `
 		SELECT id, name, branch_id, status, mobile, created_at, updated_at
 		FROM suppliers
@@ -143,9 +142,14 @@ func (r *SupplierRepo) ListSuppliers(ctx context.Context, name, status, mobile s
 		return nil, 0, err
 	}
 
-	// Add pagination
-	args = append(args, limit, offset)
-	query := baseQuery + whereClause + fmt.Sprintf(" ORDER BY name LIMIT $%d OFFSET $%d", argPos, argPos+1)
+	query := baseQuery + whereClause + " ORDER BY name"
+
+	// Add pagination only if limit > 0
+	if limit > 0 {
+		offset := (page - 1) * limit
+		args = append(args, limit, offset)
+		query += fmt.Sprintf(" LIMIT $%d OFFSET $%d", argPos, argPos+1)
+	}
 
 	rows, err := r.db.Query(ctx, query, args...)
 	if err != nil {
@@ -164,3 +168,4 @@ func (r *SupplierRepo) ListSuppliers(ctx context.Context, name, status, mobile s
 
 	return suppliers, total, nil
 }
+

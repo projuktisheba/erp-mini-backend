@@ -311,8 +311,8 @@ func (c *CustomerHandler) GetCustomers(w http.ResponseWriter, r *http.Request) {
 	limitStr := r.URL.Query().Get("limit")
 	// statusStr := r.URL.Query().Get("status")
 
-	page := 1
-	limit := 20
+	page := 0
+	limit := -1
 	var err error
 
 	if pageStr != "" {

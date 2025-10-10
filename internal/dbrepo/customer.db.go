@@ -271,7 +271,7 @@ func (s *CustomerRepo) GetCustomers(ctx context.Context, page, limit int, branch
 
 // 8. GetCustomersNameAndID (active only)
 func (s *CustomerRepo) GetCustomersNameAndID(ctx context.Context, branchID int64) ([]*models.CustomerNameID, error) {
-	query := `SELECT id, name FROM customers WHERE status = TRUE AND branch_id=$1 ORDER BY name ASC;`
+	query := `SELECT id, name, mobile FROM customers WHERE status = TRUE AND branch_id=$1 ORDER BY name ASC;`
 
 	rows, err := s.db.Query(ctx, query, branchID)
 	if err != nil {
@@ -282,7 +282,7 @@ func (s *CustomerRepo) GetCustomersNameAndID(ctx context.Context, branchID int64
 	var list []*models.CustomerNameID
 	for rows.Next() {
 		var item models.CustomerNameID
-		if err := rows.Scan(&item.ID, &item.Name); err != nil {
+		if err := rows.Scan(&item.ID, &item.Name, &item.Mobile); err != nil {
 			return nil, fmt.Errorf("error scanning customer name/id: %w", err)
 		}
 		list = append(list, &item)

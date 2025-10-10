@@ -57,6 +57,23 @@ CREATE INDEX idx_employees_mobile ON employees(mobile);
 CREATE INDEX idx_employees_role ON employees(role);
 CREATE INDEX idx_employees_branch_id ON employees(branch_id);
 
+-- Chairman
+INSERT INTO employees (name, role, status, mobile, email, password, passport_no, joining_date, address, base_salary, overtime_rate, avatar_link, branch_id)
+VALUES ('Chairman', 'chairman', 'active', '', 'chairman', '$2a$12$uV6uv.vXpU0KCeYlgBS8r.KWYoRBP2Kk4uAB2K9k4MAHD2ucZNzde', '', CURRENT_TIMESTAMP, '', 0, 0, '', 1);
+
+-- Manager
+INSERT INTO employees (name, role, status, mobile, email, password, passport_no, joining_date, address, base_salary, overtime_rate, avatar_link, branch_id)
+VALUES ('AL FANAR ABAYAT', 'manager', 'active', '', 'alfanar', '$2a$12$uV6uv.vXpU0KCeYlgBS8r.KWYoRBP2Kk4uAB2K9k4MAHD2ucZNzde', '', CURRENT_TIMESTAMP, '', 0, 0, '', 1);
+
+-- Manager
+INSERT INTO employees (name, role, status, mobile, email, password, passport_no, joining_date, address, base_salary, overtime_rate, avatar_link, branch_id)
+VALUES ('DIVA ABAYAT', 'manager', 'active', '', 'diva', '$2a$12$uV6uv.vXpU0KCeYlgBS8r.KWYoRBP2Kk4uAB2K9k4MAHD2ucZNzde', '', CURRENT_TIMESTAMP, '', 0, 0, '', 2);
+
+-- Manager
+INSERT INTO employees (name, role, status, mobile, email, password, passport_no, joining_date, address, base_salary, overtime_rate, avatar_link, branch_id)
+VALUES ('EID AL ABAYAT', 'manager', 'active', '', 'eidal', '$2a$12$uV6uv.vXpU0KCeYlgBS8r.KWYoRBP2Kk4uAB2K9k4MAHD2ucZNzde', '', CURRENT_TIMESTAMP, '', 0, 0, '', 3);
+
+
 -- =========================
 -- Table: attendance
 -- =========================
@@ -261,8 +278,8 @@ CREATE INDEX idx_transactions_to_entity_type ON transactions(to_entity_type);
 CREATE TABLE suppliers (
     id BIGSERIAL PRIMARY KEY,
     name VARCHAR(100) NOT NULL,
-    status VARCHAR(20) NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'inactive')),
-    mobile VARCHAR(20) NOT NULL UNIQUE,
+    status VARCHAR(20) NOT NULL DEFAULT 'active',
+    mobile VARCHAR(20) NOT NULL,
     branch_id BIGINT NOT NULL REFERENCES branches(id) ON DELETE CASCADE,  
     created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP

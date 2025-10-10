@@ -167,7 +167,6 @@ func (e *EmployeeHandler) UpdateEmployee(w http.ResponseWriter, r *http.Request)
 		utils.BadRequest(w, err)
 		return
 	}
-
 	if employeeDetails.ID == 0 {
 		e.errorLog.Println("ERROR_02_UpdateEmployee: Missing employee ID")
 		utils.BadRequest(w, errors.New("missing employee ID"))
@@ -262,7 +261,7 @@ func (e *EmployeeHandler) SubmitSalary(w http.ResponseWriter, r *http.Request) {
 		utils.BadRequest(w, errors.New("missing branch ID"))
 		return
 	}
-
+	e.infoLog.Println("salary: ",salary, branchID)
 	err = e.DB.SubmitSalary(r.Context(), salary.SalaryDate, salary.EmployeeID, branchID, salary.Amount)
 	if err != nil {
 		e.errorLog.Println("ERROR_04_SubmitSalary: ", err)

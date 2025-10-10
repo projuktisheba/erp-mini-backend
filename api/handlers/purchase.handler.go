@@ -69,93 +69,103 @@ func (h *PurchaseHandler) AddPurchase(w http.ResponseWriter, r *http.Request) {
 	utils.WriteJSON(w, http.StatusCreated, resp)
 }
 
-// =========================
-// ListPurchase
-// =========================
+// ListPurchases handles GET /purchases
 func (h *PurchaseHandler) ListPurchases(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 
-	// Query parameters
-	memoNo := r.URL.Query().Get("memo_no")
-	supplierIDStr := r.URL.Query().Get("supplier_id")
+	// -------------------------
+	// Get branch ID from header
+	// -------------------------
 	branchID := utils.GetBranchID(r)
 	if branchID == 0 {
-		h.errorLog.Println("ERROR_01_ListPurchases: Branch ID not found")
-		utils.BadRequest(w, errors.New("Branch ID not found. Please include 'X-Branch-ID' header, e.g., X-Branch-ID: 1"))
+		h.errorLog.Println("ERROR_ListPurchases: Branch ID not found")
+		utils.BadRequest(w, errors.New("Branch ID not found. Include 'X-Branch-ID' header, e.g., X-Branch-ID: 1"))
 		return
 	}
 
-	// Parse supplierID
-	var supplierID int64
-	if supplierIDStr != "" {
-		if id, err := strconv.ParseInt(supplierIDStr, 10, 64); err == nil {
-			supplierID = id
-		} else {
+	// -------------------------
+	// Query parameters
+	// -------------------------
+	memoNo := r.URL.Query().Get("memo_no")
+	supplierID := int64(0)
+	if sID := r.URL.Query().Get("supplier_id"); sID != "" {
+		id, err := strconv.ParseInt(sID, 10, 64)
+		if err != nil {
 			utils.BadRequest(w, errors.New("invalid supplier_id"))
 			return
 		}
+		supplierID = id
 	}
 
-	// Pagination parameters
-	pageStr := r.URL.Query().Get("page")
-	limitStr := r.URL.Query().Get("limit")
-	page := 1
-	limit := 20
-	if pageStr != "" {
-		if p, err := strconv.Atoi(pageStr); err == nil && p > 0 {
-			page = p
+	// -------------------------
+	// Pagination
+	// -------------------------
+	page := 0
+	limit := 0
+	if p := r.URL.Query().Get("page"); p != "" {
+		if pi, err := strconv.Atoi(p); err == nil && pi > 0 {
+			page = pi
 		}
 	}
-	if limitStr != "" {
-		if l, err := strconv.Atoi(limitStr); err == nil && l > 0 {
-			limit = l
+	if l := r.URL.Query().Get("limit"); l != "" {
+		if li, err := strconv.Atoi(l); err == nil && li > 0 {
+			limit = li
 		}
 	}
 
+	// -------------------------
 	// Optional date filters
+	// -------------------------
 	var fromDate, toDate *time.Time
 	if f := r.URL.Query().Get("from_date"); f != "" {
-		if t, err := time.Parse("2006-01-02", f); err == nil {
-			fromDate = &t
-		} else {
+		t, err := time.Parse("2006-01-02", f)
+		if err != nil {
 			utils.BadRequest(w, errors.New("invalid from_date format, expected YYYY-MM-DD"))
 			return
 		}
+		fromDate = &t
 	}
 	if t := r.URL.Query().Get("to_date"); t != "" {
-		if tt, err := time.Parse("2006-01-02", t); err == nil {
-			toDate = &tt
-		} else {
+		tt, err := time.Parse("2006-01-02", t)
+		if err != nil {
 			utils.BadRequest(w, errors.New("invalid to_date format, expected YYYY-MM-DD"))
 			return
 		}
+		toDate = &tt
 	}
 
-	// Fetch purchases with pagination
+	// -------------------------
+	// Fetch purchases from DB
+	// -------------------------
 	purchases, total, err := h.DB.ListPurchasesPaginated(ctx, memoNo, supplierID, branchID, fromDate, toDate, page, limit)
 	if err != nil {
-		h.errorLog.Println("ERROR_01_ListPurchases:", err)
+		h.errorLog.Println("ERROR_ListPurchases: failed to list purchases:", err)
 		utils.ServerError(w, err)
 		return
 	}
 
-	// Build response
-	var resp struct {
+	// -------------------------
+	// Response
+	// -------------------------
+	type PurchaseListResponse struct {
 		Error     bool               `json:"error"`
 		Status    string             `json:"status"`
 		Message   string             `json:"message"`
 		Total     int                `json:"total"`
 		Page      int                `json:"page"`
 		Limit     int                `json:"limit"`
-		Purchases []*models.Purchase `json:"purchases"`
+		Purchases []*models.Purchase `json:"report"`
 	}
-	resp.Error = false
-	resp.Status = "success"
-	resp.Message = "Purchases retrieved successfully"
-	resp.Total = total
-	resp.Page = page
-	resp.Limit = limit
-	resp.Purchases = purchases
+
+	resp := PurchaseListResponse{
+		Error:     false,
+		Status:    "success",
+		Message:   "Purchases retrieved successfully",
+		Total:     total,
+		Page:      page,
+		Limit:     limit,
+		Purchases: purchases,
+	}
 
 	utils.WriteJSON(w, http.StatusOK, resp)
 }

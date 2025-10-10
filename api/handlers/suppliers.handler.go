@@ -44,6 +44,7 @@ func (h *SupplierHandler) AddSupplier(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	supplier.BranchID = branchID
+	supplier.Status = "active"
 	err = h.DB.CreateSupplier(r.Context(), &supplier)
 	if err != nil {
 		h.errorLog.Println("ERROR_02_AddSupplier:", err)
@@ -149,8 +150,8 @@ func (h *SupplierHandler) ListSuppliers(w http.ResponseWriter, r *http.Request) 
 	pageStr := r.URL.Query().Get("page")
 	limitStr := r.URL.Query().Get("limit")
 
-	page := 1
-	limit := 20
+	page := 0
+	limit := 0
 
 	if pageStr != "" {
 		if p, err := strconv.Atoi(pageStr); err == nil && p > 0 {
@@ -164,9 +165,7 @@ func (h *SupplierHandler) ListSuppliers(w http.ResponseWriter, r *http.Request) 
 		}
 	}
 
-	offset := (page - 1) * limit
-
-	suppliers, total, err := h.DB.ListSuppliers(r.Context(), name, status, mobile, limit, offset, branchID)
+	suppliers, total, err := h.DB.ListSuppliers(r.Context(), name, status, mobile, page, limit, branchID)
 	if err != nil {
 		h.errorLog.Println("ERROR_01_SearchSuppliersPaginated:", err)
 		utils.ServerError(w, err)
