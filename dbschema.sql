@@ -59,19 +59,19 @@ CREATE INDEX idx_employees_branch_id ON employees(branch_id);
 
 -- Chairman
 INSERT INTO employees (name, role, status, mobile, email, password, passport_no, joining_date, address, base_salary, overtime_rate, avatar_link, branch_id)
-VALUES ('Chairman', 'chairman', 'active', '', 'chairman', '$2a$12$uV6uv.vXpU0KCeYlgBS8r.KWYoRBP2Kk4uAB2K9k4MAHD2ucZNzde', '', CURRENT_TIMESTAMP, '', 0, 0, '', 1);
+VALUES ('Chairman', 'chairman', 'active', '000', 'chairman', '$2a$12$uV6uv.vXpU0KCeYlgBS8r.KWYoRBP2Kk4uAB2K9k4MAHD2ucZNzde', '', CURRENT_TIMESTAMP, '', 0, 0, '', 1);
 
 -- Manager
 INSERT INTO employees (name, role, status, mobile, email, password, passport_no, joining_date, address, base_salary, overtime_rate, avatar_link, branch_id)
-VALUES ('AL FANAR ABAYAT', 'manager', 'active', '', 'alfanar', '$2a$12$uV6uv.vXpU0KCeYlgBS8r.KWYoRBP2Kk4uAB2K9k4MAHD2ucZNzde', '', CURRENT_TIMESTAMP, '', 0, 0, '', 1);
+VALUES ('AL FANAR ABAYAT', 'manager', 'active', '001', 'alfanar', '$2a$12$uV6uv.vXpU0KCeYlgBS8r.KWYoRBP2Kk4uAB2K9k4MAHD2ucZNzde', '', CURRENT_TIMESTAMP, '', 0, 0, '', 1);
 
 -- Manager
 INSERT INTO employees (name, role, status, mobile, email, password, passport_no, joining_date, address, base_salary, overtime_rate, avatar_link, branch_id)
-VALUES ('DIVA ABAYAT', 'manager', 'active', '', 'diva', '$2a$12$uV6uv.vXpU0KCeYlgBS8r.KWYoRBP2Kk4uAB2K9k4MAHD2ucZNzde', '', CURRENT_TIMESTAMP, '', 0, 0, '', 2);
+VALUES ('DIVA ABAYAT', 'manager', 'active', '002', 'diva', '$2a$12$uV6uv.vXpU0KCeYlgBS8r.KWYoRBP2Kk4uAB2K9k4MAHD2ucZNzde', '', CURRENT_TIMESTAMP, '', 0, 0, '', 2);
 
 -- Manager
 INSERT INTO employees (name, role, status, mobile, email, password, passport_no, joining_date, address, base_salary, overtime_rate, avatar_link, branch_id)
-VALUES ('EID AL ABAYAT', 'manager', 'active', '', 'eidal', '$2a$12$uV6uv.vXpU0KCeYlgBS8r.KWYoRBP2Kk4uAB2K9k4MAHD2ucZNzde', '', CURRENT_TIMESTAMP, '', 0, 0, '', 3);
+VALUES ('EID AL ABAYAT', 'manager', 'active', '003', 'eidal', '$2a$12$uV6uv.vXpU0KCeYlgBS8r.KWYoRBP2Kk4uAB2K9k4MAHD2ucZNzde', '', CURRENT_TIMESTAMP, '', 0, 0, '', 3);
 
 
 -- =========================
@@ -152,16 +152,28 @@ VALUES
 CREATE TABLE public.products (
     id BIGSERIAL PRIMARY KEY,
     product_name character varying(255) DEFAULT ''::character varying NOT NULL,
+    quantity BIGINT NOT NULL DEFAULT 0,
+    branch_id BIGINT NOT NULL REFERENCES branches(id) ON DELETE CASCADE,
     created_at timestamp without time zone DEFAULT CURRENT_TIMESTAMP,
     updated_at timestamp without time zone DEFAULT CURRENT_TIMESTAMP
 );
-INSERT INTO public.products (product_name) 
+INSERT INTO public.products (product_name, branch_id) 
 VALUES 
-  ('Abayat Shela (L)'),
-  ('Abayat Shela (M)'),
-  ('Abayat Shela (S)'),
-  ('Abayat Raj'),
-  ('Khamar');
+  ('Abayat Shela (L)',1),
+  ('Abayat Shela (M)',1),
+  ('Abayat Shela (S)',1),
+  ('Abayat Raj',1),
+  ('Khamar',1),
+  ('Abayat Shela (L)',2),
+  ('Abayat Shela (M)',2),
+  ('Abayat Shela (S)',2),
+  ('Abayat Raj',2),
+  ('Khamar',2),
+  ('Abayat Shela (L)',3),
+  ('Abayat Shela (M)',3),
+  ('Abayat Shela (S)',3),
+  ('Abayat Raj',3),
+  ('Khamar',3);
 -- =========================
 -- Table: orders
 -- =========================
@@ -316,12 +328,84 @@ CREATE TABLE top_sheet (
     id BIGSERIAL PRIMARY KEY,
     sheet_date DATE NOT NULL DEFAULT CURRENT_DATE,
     branch_id BIGINT NOT NULL REFERENCES branches(id) ON DELETE CASCADE,
-    expense NUMERIC(12,2) NOT NULL,
-    cash NUMERIC(12,2) NOT NULL,
-    bank NUMERIC(12,2) NOT NULL,
-    order_count BIGINT NOT NULL,
-    delivery BIGINT NOT NULL,
-    checkout BIGINT NOT NULL,
+    expense NUMERIC(12,2) NOT NULL  DEFAULT 0.00,
+    cash NUMERIC(12,2) NOT NULL DEFAULT 0.00,
+    bank NUMERIC(12,2) NOT NULL DEFAULT 0.00,
+    order_count BIGINT NOT NULL DEFAULT 0,
+    delivery BIGINT NOT NULL DEFAULT 0,
+    checkout BIGINT NOT NULL DEFAULT 0,
+    ready_made BIGINT NOT NULL DEFAULT 0,
     UNIQUE(sheet_date, branch_id)
 );
 CREATE INDEX idx_top_sheet_sheet_date ON top_sheet(sheet_date, branch_id);
+
+CREATE TABLE product_stock_registry (
+    id BIGSERIAL PRIMARY KEY,
+    memo_no VARCHAR(100) NOT NULL DEFAULT '',
+    stock_date DATE NOT NULL DEFAULT CURRENT_DATE,
+    branch_id BIGINT NOT NULL REFERENCES branches(id) ON DELETE CASCADE,
+    product_id BIGINT NOT NULL REFERENCES products(id) ON DELETE CASCADE,
+    quantity BIGINT NOT NULL DEFAULT 0,
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+-- index creation
+CREATE INDEX idx_product_stock_registry_memo_no ON product_stock_registry (memo_no);
+CREATE INDEX idx_product_stock_registry_product_id ON product_stock_registry (product_id);
+CREATE INDEX idx_product_stock_registry_stock_date_branch_id ON product_stock_registry (stock_date, branch_id);
+
+CREATE TABLE sales_history (
+    id BIGSERIAL PRIMARY KEY,
+    memo_no VARCHAR(100) NOT NULL UNIQUE,
+    sale_date DATE NOT NULL DEFAULT CURRENT_DATE,
+    branch_id BIGINT NOT NULL REFERENCES branches(id) ON DELETE CASCADE,    
+    customer_id BIGINT NOT NULL REFERENCES customers(id) ON DELETE CASCADE,
+    salesperson_id BIGINT NOT NULL REFERENCES employees(id) ON DELETE CASCADE,
+    payment_account_id BIGINT NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
+    total_payable_amount NUMERIC(12,2) NOT NULL  DEFAULT 0.00,
+    paid_amount NUMERIC(12,2) NOT NULL  DEFAULT 0.00,
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+-- index creation
+CREATE INDEX idx_sales_history_memo_no ON sales_history (memo_no);
+CREATE INDEX idx_sales_history_customer_id ON sales_history (customer_id);
+CREATE INDEX idx_sales_history_salesperson_id ON sales_history (salesperson_id);
+CREATE INDEX idx_sales_history_stock_date_branch_id ON sales_history (sale_date, branch_id);
+
+CREATE TABLE sold_items_history (
+    id BIGSERIAL PRIMARY KEY,
+    memo_no VARCHAR(100) NOT NULL DEFAULT '',
+    product_id BIGINT NOT NULL REFERENCES products(id) ON DELETE CASCADE,
+    quantity BIGINT NOT NULL DEFAULT 0,
+    total_prices NUMERIC(12,2) NOT NULL  DEFAULT 0.00,
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+CREATE INDEX idx_sold_items_history_memo_no ON sold_items_history (memo_no);
+CREATE INDEX idx_sold_items_history_product_id ON sold_items_history (product_id);
+
+
+CREATE TABLE employees_progress (
+    id BIGSERIAL PRIMARY KEY,
+    sheet_date DATE NOT NULL DEFAULT CURRENT_DATE,
+    branch_id BIGINT NOT NULL REFERENCES branches(id) ON DELETE CASCADE,
+    employee_id BIGINT NOT NULL REFERENCES employees(id) ON DELETE CASCADE,
+    -- progress metrics for salesperson
+    sale_amount NUMERIC(12,2) NOT NULL  DEFAULT 0.00,
+    sale_return_amount NUMERIC(12,2) NOT NULL DEFAULT 0.00,
+    order_count BIGINT NOT NULL DEFAULT 0,
+    item_count BIGINT NOT NULL DEFAULT 0,
+
+    -- progress metrics for worker
+    production_units BIGINT NOT NULL DEFAULT 0,
+    overtime_hours SMALLINT NOT NULL DEFAULT 0,
+    advance_payment NUMERIC(12,2) NOT NULL  DEFAULT 0.00,
+
+    salary NUMERIC(12,2) NOT NULL  DEFAULT 0.00,
+    
+    UNIQUE(sheet_date, employee_id)
+);
+CREATE INDEX idx_employees_progress_branch_id ON employees_progress(branch_id);

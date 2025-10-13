@@ -94,7 +94,7 @@ type Purchase struct {
 	MemoNo       string    `json:"memo_no"`
 	PurchaseDate time.Time `json:"purchase_date"`
 	SupplierID   int64     `json:"supplier_id"`
-	SupplierName string     `json:"supplier_name"`
+	SupplierName string    `json:"supplier_name"`
 	BranchID     int64     `json:"branch_id"`
 	TotalAmount  float64   `json:"total_amount"`
 	Notes        string    `json:"notes"`
@@ -125,12 +125,10 @@ type Customer struct {
 	UpdatedAt    time.Time `json:"updated_at"`
 }
 
-
-
 // CustomerNameID is a lightweight struct for fetching only customer's ID and Name.
 type CustomerNameID struct {
-	ID   int64  `json:"id"`
-	Name string `json:"name"`
+	ID     int64  `json:"id"`
+	Name   string `json:"name"`
 	Mobile string `json:"mobile"`
 }
 
@@ -165,12 +163,44 @@ type EmployeeCalendar struct {
 }
 
 type Product struct {
+	ID                int64     `json:"id"`
+	ProductName       string    `json:"product_name"`
+	Quantity          int64     `json:"quantity"`
+	TotalPrices       int64     `json:"total_price"`
+	CurrentStockLevel int64     `json:"current_stock_level"`
+	CreatedAt         time.Time `json:"created_at"`
+	UpdatedAt         time.Time `json:"updated_at"`
+}
+type Sale struct {
+	SaleDate           time.Time  `json:"sale_date"`
+	MemoNo             string     `json:"memo_no"`
+	BranchID             string     `json:"branch_id"`
+	SalespersonID      int64      `json:"salesperson_id"`
+	SalespersonName    string     `json:"salesperson_name"`
+	CustomerID         int64      `json:"customer_id"`
+	CustomerName       string     `json:"customer_name"`
+	TotalPayableAmount float64    `json:"total_payable_amount"`
+	PaidAmount         float64    `json:"paid_amount"`
+	DueAmount          float64    `json:"due_amount"`
+	PaymentAccountID   int64      `json:"payment_account_id"`
+	PaymentAccountName   string      `json:"payment_account_name"`
+	Notes              string     `json:"notes"`
+	Items              []*Product `json:"items"`
+}
+
+// ProductStockRegistry represents a record from product_stock_registry
+type ProductStockRegistry struct {
 	ID          int64     `json:"id"`
+	MemoNo      string    `json:"memo_no"`
+	StockDate   time.Time `json:"stock_date"`
+	BranchID    int64     `json:"branch_id"`
+	BranchName  string    `json:"branch_name"`
+	ProductID   int64     `json:"product_id"`
 	ProductName string    `json:"product_name"`
+	Quantity    int64     `json:"quantity"`
 	CreatedAt   time.Time `json:"created_at"`
 	UpdatedAt   time.Time `json:"updated_at"`
 }
-
 type Order struct {
 	ID                   int64        `json:"id"`
 	BranchID             int64        `json:"branch_id"`
@@ -178,7 +208,7 @@ type Order struct {
 	OrderDate            time.Time    `json:"order_date"`
 	SalespersonID        int64        `json:"salesperson_id"`
 	SalespersonName      string       `json:"salesperson_name,omitempty"`
-	SalespersonMobile      string       `json:"salesperson_mobile,omitempty"`
+	SalespersonMobile    string       `json:"salesperson_mobile,omitempty"`
 	CustomerID           int64        `json:"customer_id"`
 	CustomerName         string       `json:"customer_name,omitempty"`
 	CustomerMobile       string       `json:"customer_mobile,omitempty"`
@@ -287,4 +317,28 @@ type TopSheet struct {
 	OrderCount  int64     `json:"order_count"`
 	Delivery    int64     `json:"delivery"`
 	Checkout    int64     `json:"checkout"`
+	ReadyMade   int64     `json:"ready_made"`
+}
+
+// Salesperson progress struct
+type SalespersonProgress struct {
+	Date             time.Time `json:"sheet_date"`
+	BranchID         int64     `json:"branch_id"`
+	EmployeeID       int64     `json:"employee_id"`
+	SaleAmount       float64   `json:"sale_amount"`
+	SaleReturnAmount float64   `json:"sale_return_amount"`
+	OrderCount       int64     `json:"order_count"`
+	ItemCount        int64     `json:"item_count"`
+	Salary           float64   `json:"salary"`
+}
+
+// Worker progress struct
+type WorkerProgress struct {
+	Date            time.Time `json:"sheet_date"`
+	BranchID        int64     `json:"branch_id"`
+	EmployeeID      int64     `json:"employee_id"`
+	ProductionUnits int64     `json:"production_units"`
+	OvertimeHours   int16     `json:"overtime_hours"`
+	AdvancePayment  float64   `json:"advance_payment"`
+	Salary          float64   `json:"salary"`
 }
