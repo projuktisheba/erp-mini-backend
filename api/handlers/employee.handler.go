@@ -519,3 +519,34 @@ func (e *EmployeeHandler) UploadEmployeeProfilePicture(w http.ResponseWriter, r 
 
 	utils.WriteJSON(w, http.StatusOK, resp)
 }
+
+
+func (e *EmployeeHandler) RecordWorkerDailyProgress(w http.ResponseWriter, r *http.Request){
+
+	branchID := utils.GetBranchID(r)
+	if branchID == 0 {
+		e.errorLog.Println("ERROR_01_RecordWorkerDailyProgress: Missing branch ID")
+		utils.BadRequest(w, errors.New("missing branch ID"))
+		return
+	}
+	var requestBody models.WorkerProgress
+	err := utils.ReadJSON(w, r, &requestBody)
+
+	if err != nil {
+		e.errorLog.Println("ERROR_02_RecordWorkerDailyProgress: Unable to read JSON", err)
+		utils.BadRequest(w, errors.New("Error reading JSON"))
+		return
+	}
+	requestBody.BranchID = branchID
+	err = e.DB.UpdateWorkerProgress(r.Context(), requestBody)
+	if err != nil {
+		e.errorLog.Println("ERROR_03_RecordWorkerDailyProgress: Database error", err)
+		utils.BadRequest(w, err)
+		return
+	}
+	var response models.Response
+
+	response.Error = false
+	response.Message = "Progress record updated successfully"
+	utils.WriteJSON(w, http.StatusOK, response)
+}

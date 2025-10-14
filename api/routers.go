@@ -86,6 +86,9 @@ func (app *application) routes() http.Handler {
 		// Update employee role and status
 		// Example: PUT /api/v1/hr/employee/role
 		r.Put("/employee/role", app.Handlers.Employee.UpdateEmployeeRole)
+
+		// Update employee progress record
+		r.Post("/worker/progress", app.Handlers.Employee.RecordWorkerDailyProgress)
 	})
 
 	// -------------------- Attendance Routes --------------------

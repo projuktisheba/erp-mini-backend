@@ -334,7 +334,7 @@ type SalespersonProgress struct {
 
 // Worker progress struct
 type WorkerProgress struct {
-	Date            time.Time `json:"sheet_date"`
+	Date            time.Time `json:"work_date"`
 	BranchID        int64     `json:"branch_id"`
 	EmployeeID      int64     `json:"employee_id"`
 	ProductionUnits int64     `json:"production_units"`

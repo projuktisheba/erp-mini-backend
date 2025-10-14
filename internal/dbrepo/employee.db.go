@@ -193,36 +193,10 @@ func (user *EmployeeRepo) SubmitSalary(ctx context.Context, salaryDate time.Time
 	if err != nil {
 		return fmt.Errorf("begin tx: %w", err)
 	}
-	defer tx.Rollback(ctx) // will rollback if not committed
+	defer tx.Rollback(ctx)
 
-	// Insert or update in attendance table
-	query := `
-		INSERT INTO attendance (
-			employee_id, work_date, branch_id, status, advance_payment, overtime_hours, production_units
-		)
-		VALUES ($1, $2, $3, $4, $5, $6, $7)
-		ON CONFLICT (employee_id, work_date)
-		DO UPDATE SET 
-			status          = EXCLUDED.status,  -- replace status
-			advance_payment = attendance.advance_payment + EXCLUDED.advance_payment,
-			overtime_hours  = attendance.overtime_hours + EXCLUDED.overtime_hours,
-			production_units = attendance.production_units + EXCLUDED.production_units,
-			updated_at      = CURRENT_TIMESTAMP;
-
-	`
-
-	_, err = tx.Exec(ctx, query,
-		employeeID,
-		salaryDate,
-		branchID,
-		"Present",
-		amount,
-		0,
-		0,
-	)
-	if err != nil {
-		return fmt.Errorf("insert/update attendance: %w", err)
-	}
+	// update employee_progress
+	SubmitEmployeeSalaryTx(tx, ctx, salaryDate, branchID, employeeID, amount)
 
 	//increment expense
 	// Update top_sheet inside the same tx
@@ -231,7 +205,7 @@ func (user *EmployeeRepo) SubmitSalary(ctx context.Context, salaryDate time.Time
 		BranchID: branchID,
 		Expense:  amount,
 	}
-	err = SaveTopSheetTx(tx, ctx, topSheet) // <-- must accept tx, not db
+	err = SaveTopSheetTx(tx, ctx, topSheet)
 	if err != nil {
 		return fmt.Errorf("save topsheet: %w", err)
 	}
@@ -241,7 +215,7 @@ func (user *EmployeeRepo) SubmitSalary(ctx context.Context, salaryDate time.Time
 		BranchID:        branchID,
 		FromID:          branchID,
 		FromAccountName: "Branch",
-		FromType:        "Branch",
+		FromType:        "branch",
 		ToID:            employeeID,
 		ToAccountName:   "",
 		ToType:          "employees",
@@ -420,4 +394,44 @@ func (e *EmployeeRepo) PaginatedEmployeeList(ctx context.Context, page, limit in
 	}
 
 	return employees, total, nil
+}
+
+func (e *EmployeeRepo) UpdateWorkerProgress(ctx context.Context, workerProgress models.WorkerProgress) error {
+	tx, err := e.db.Begin(ctx)
+	if err != nil {
+		return err
+	}
+	//update employee_progress_table
+	err = UpdateWorkerProgressReportTx(tx, ctx, &workerProgress)
+	if err != nil {
+		return err
+	}
+	//update top_sheet if AdvancePayment > 0
+	if workerProgress.AdvancePayment > 0 {
+		err := SaveTopSheetTx(tx, ctx, &models.TopSheet{
+			Date:     workerProgress.Date,
+			BranchID: workerProgress.BranchID,
+			Expense:  workerProgress.AdvancePayment,
+		})
+		if err != nil {
+			return err
+		}
+
+		//insert transaction
+		transaction := &models.Transaction{
+			BranchID:        workerProgress.BranchID,
+			FromID:          workerProgress.BranchID,
+			FromAccountName: "Branch",
+			FromType:        "branch",
+			ToID:            workerProgress.EmployeeID,
+			ToAccountName:   "",
+			ToType:          "employees",
+			Amount:          workerProgress.AdvancePayment,
+			TransactionType: "salary",
+			CreatedAt:       workerProgress.Date,
+			Notes:           "Worker advance payment",
+		}
+		CreateTransactionTx(ctx, tx, transaction) // silently add transaction
+	}
+	return tx.Commit(ctx)
 }

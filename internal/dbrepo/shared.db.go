@@ -2,6 +2,7 @@ package dbrepo
 
 import (
 	"context"
+	"time"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -56,8 +57,7 @@ func UpdateSalespersonProgressReportTx(tx pgx.Tx, ctx context.Context, ts *model
 		sale_amount        = employees_progress.sale_amount + EXCLUDED.sale_amount,
 		sale_return_amount = employees_progress.sale_return_amount + EXCLUDED.sale_return_amount,
 		order_count        = employees_progress.order_count + EXCLUDED.order_count,
-		item_count         = employees_progress.item_count + EXCLUDED.item_count,
-		salary             = employees_progress.salary + EXCLUDED.salary;
+		item_count         = employees_progress.item_count + EXCLUDED.item_count;
 	`
 	_, err := tx.Exec(ctx, query,
 		ts.Date,
@@ -83,8 +83,7 @@ func UpdateWorkerProgressReportTx(tx pgx.Tx, ctx context.Context, wp *models.Wor
 	ON CONFLICT (sheet_date, employee_id) DO UPDATE SET
 		production_units = employees_progress.production_units + EXCLUDED.production_units,
 		overtime_hours   = employees_progress.overtime_hours + EXCLUDED.overtime_hours,
-		advance_payment  = employees_progress.advance_payment + EXCLUDED.advance_payment,
-		salary           = employees_progress.salary + EXCLUDED.salary;
+		advance_payment  = employees_progress.advance_payment + EXCLUDED.advance_payment;
 	`
 	_, err := tx.Exec(ctx, query,
 		wp.Date,
@@ -94,6 +93,23 @@ func UpdateWorkerProgressReportTx(tx pgx.Tx, ctx context.Context, wp *models.Wor
 		wp.OvertimeHours,
 		wp.AdvancePayment,
 		wp.Salary,
+	)
+	return err
+}
+// SubmitEmployeeSalaryTx updates or inserts employee salary
+func SubmitEmployeeSalaryTx(tx pgx.Tx, ctx context.Context, date time.Time, branchID int64, employeeID int64, salary float64) error {
+	query := `
+	INSERT INTO employees_progress (
+		sheet_date, branch_id, employee_id, salary
+	) VALUES ($1,$2,$3,$4)
+	ON CONFLICT (sheet_date, employee_id) DO UPDATE SET
+		salary  = employees_progress.salary + EXCLUDED.salary;
+	`
+	_, err := tx.Exec(ctx, query,
+		date,
+		branchID,
+		employeeID,
+		salary,
 	)
 	return err
 }

@@ -81,8 +81,8 @@ func (r *ReportRepo) GetOrderOverView(ctx context.Context, branchID int64, summa
 	return &s, nil
 }
 
-// GetEmployeeProgressReport gives the progress report of a particular employee for a given period
-// GetSalesPersonProgressReport gives the sales progress report for all salespersons in a branch
+// GetSalesPersonProgressReport gives sales progress summary for all salespersons in a branch
+// grouped by day, week, month, or year — based on data from employees_progress table.
 func (r *ReportRepo) GetSalesPersonProgressReport(
 	ctx context.Context,
 	branchID int64,
@@ -92,129 +92,30 @@ func (r *ReportRepo) GetSalesPersonProgressReport(
 
 	var report []*models.SalesPersonProgressReport
 
-	// Choose date grouping
-	var dateSelect, groupBy, orderBy string
-
+	// Choose grouping format
+	var dateSelect, dateGroupExpr string
 	switch reportType {
 	case "daily":
-		dateSelect = "to_char(o.order_date, 'YYYY-MM-DD') AS date_label"
-		groupBy = "s.id, to_char(o.order_date, 'YYYY-MM-DD'), p.product_name"
-		orderBy = "s.name, date_label, p.product_name"
-
+		dateSelect = "COALESCE(to_char(ep.sheet_date, 'YYYY-MM-DD'), '') AS date_label"
+		dateGroupExpr = "to_char(ep.sheet_date, 'YYYY-MM-DD')"
 	case "weekly":
-		dateSelect = "to_char(o.order_date, 'IYYY-IW') AS date_label"
-		groupBy = "s.id, to_char(o.order_date, 'IYYY-IW'), p.product_name"
-		orderBy = "s.name, date_label, p.product_name"
-
+		dateSelect = "COALESCE(to_char(ep.sheet_date, 'IYYY-IW'), '') AS date_label"
+		dateGroupExpr = "to_char(ep.sheet_date, 'IYYY-IW')"
 	case "monthly":
-		dateSelect = "to_char(o.order_date, 'YYYY-MM') AS date_label"
-		groupBy = "s.id, to_char(o.order_date, 'YYYY-MM'), p.product_name"
-		orderBy = "s.name, date_label, p.product_name"
-
+		dateSelect = "COALESCE(to_char(ep.sheet_date, 'YYYY-MM'), '') AS date_label"
+		dateGroupExpr = "to_char(ep.sheet_date, 'YYYY-MM')"
 	case "yearly":
-		dateSelect = "to_char(o.order_date, 'YYYY') AS date_label"
-		groupBy = "s.id, to_char(o.order_date, 'YYYY'), p.product_name"
-		orderBy = "s.name, date_label, p.product_name"
-
+		dateSelect = "COALESCE(to_char(ep.sheet_date, 'YYYY'), '') AS date_label"
+		dateGroupExpr = "to_char(ep.sheet_date, 'YYYY')"
 	default:
 		return nil, fmt.Errorf("invalid reportType: %s", reportType)
 	}
 
-	// Include salesperson info
-	query := fmt.Sprintf(`
-        SELECT
-            s.id AS salesperson_id,
-            s.name,
-            s.mobile,
-            s.email,
-            s.base_salary,
-            %s,
-            p.product_name,
-            COUNT(DISTINCT o.id) AS order_count,
-            COALESCE(SUM(oi.quantity), 0) AS item_count,
-            COALESCE(SUM(oi.subtotal), 0) AS total_sale,
-            COALESCE(SUM(oi.subtotal) FILTER (WHERE o.status = 'cancelled'), 0) AS total_sale_return
-        FROM employees s
-        LEFT JOIN orders o 
-               ON s.id = o.salesperson_id 
-              AND o.order_date >= $2 
-              AND o.order_date <= $3
-        LEFT JOIN order_items oi ON oi.memo_no = o.memo_no
-        LEFT JOIN products p     ON p.id = oi.product_id
-        WHERE s.branch_id = $1
-          AND s.role = 'salesperson'
-          AND o.order_date IS NOT NULL
-        GROUP BY %s, s.id, s.name, s.mobile, s.email, s.base_salary
-        ORDER BY %s;
-    `, dateSelect, groupBy, orderBy)
+	groupBy := fmt.Sprintf("e.id, %s", dateGroupExpr)
+	orderBy := fmt.Sprintf("%s, e.name", dateGroupExpr)
 
-	rows, err := r.db.Query(ctx, query, branchID, startDate, endDate)
-	if err != nil {
-		return nil, fmt.Errorf("query execution failed: %w", err)
-	}
-	defer rows.Close()
-
-	for rows.Next() {
-		rp := &models.SalesPersonProgressReport{}
-		err := rows.Scan(
-			&rp.SalesPersonID,
-			&rp.SalesPersonName,
-			&rp.Mobile,
-			&rp.Email,
-			&rp.BaseSalary,
-			&rp.Date,
-			&rp.ProductName,
-			&rp.OrderCount,
-			&rp.ItemCount,
-			&rp.Sale,
-			&rp.SaleReturn,
-		)
-		if err != nil {
-			return nil, fmt.Errorf("row scan failed: %w", err)
-		}
-		report = append(report, rp)
-	}
-
-	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("row iteration error: %w", err)
-	}
-
-	return report, nil
-}
-
-// GetAllWorkersProgressReport gives attendance/progress summary for all employees in a branch
-func (r *ReportRepo) GetAllWorkersProgressReport(
-	ctx context.Context,
-	branchID int64,
-	startDate, endDate time.Time,
-	reportType string,
-) ([]*models.WorkerProgressReport, error) {
-
-	var report []*models.WorkerProgressReport
-
-	// Choose date grouping
-	var dateSelect, dateGroupExpr, groupBy, orderBy string
-	switch reportType {
-	case "daily":
-		dateSelect = "to_char(a.work_date, 'YYYY-MM-DD') AS date_label"
-		dateGroupExpr = "to_char(a.work_date, 'YYYY-MM-DD')"
-	case "weekly":
-		dateSelect = "to_char(a.work_date, 'IYYY-IW') AS date_label"
-		dateGroupExpr = "to_char(a.work_date, 'IYYY-IW')"
-	case "monthly":
-		dateSelect = "to_char(a.work_date, 'YYYY-MM') AS date_label"
-		dateGroupExpr = "to_char(a.work_date, 'YYYY-MM')"
-	case "yearly":
-		dateSelect = "to_char(a.work_date, 'YYYY') AS date_label"
-		dateGroupExpr = "to_char(a.work_date, 'YYYY')"
-	default:
-		return nil, fmt.Errorf("invalid reportType: %s", reportType)
-	}
-
-	groupBy = fmt.Sprintf("e.id, %s", dateGroupExpr)
-	orderBy = fmt.Sprintf("e.name, %s", dateGroupExpr)
-
-	// Final query (excluding rows with NULL date)
+	// MAIN TABLE: employees_progress
+	// LEFT JOIN employees to include missing employee info if progress exists without employee record
 	query := fmt.Sprintf(`
         SELECT
             e.id AS employee_id,
@@ -223,16 +124,16 @@ func (r *ReportRepo) GetAllWorkersProgressReport(
             e.email,
             e.base_salary,
             %s,
-            COUNT(a.id) AS present_days,
-            COALESCE(SUM(a.advance_payment), 0)  AS total_advance_payment,
-            COALESCE(SUM(a.production_units), 0) AS total_production_units,
-            COALESCE(SUM(a.overtime_hours), 0)   AS total_overtime_hours
-        FROM employees e
-        LEFT JOIN attendance a 
-            ON e.id = a.employee_id 
-            AND a.work_date BETWEEN $2 AND $3
-        WHERE e.branch_id = $1 AND e.role = 'worker'
-          AND a.work_date IS NOT NULL
+            COALESCE(SUM(ep.sale_amount), 0)        AS total_sale_amount,
+            COALESCE(SUM(ep.sale_return_amount), 0) AS total_sale_return_amount,
+            COALESCE(SUM(ep.order_count), 0)        AS total_order_count,
+            COALESCE(SUM(ep.item_count), 0)         AS total_item_count
+        FROM employees_progress ep
+        LEFT JOIN employees e 
+            ON e.id = ep.employee_id
+        WHERE ep.branch_id = $1
+          AND ep.sheet_date BETWEEN $2 AND $3
+          AND e.role = 'salesperson'
         GROUP BY %s, e.id, e.name, e.mobile, e.email, e.base_salary
         ORDER BY %s;
     `, dateSelect, groupBy, orderBy)
@@ -244,23 +145,111 @@ func (r *ReportRepo) GetAllWorkersProgressReport(
 	defer rows.Close()
 
 	for rows.Next() {
-		rp := &models.WorkerProgressReport{}
-		err := rows.Scan(
+		var rp models.SalesPersonProgressReport
+		if err := rows.Scan(
+			&rp.SalesPersonID,
+			&rp.SalesPersonName,
+			&rp.Mobile,
+			&rp.Email,
+			&rp.BaseSalary,
+			&rp.Date,
+			&rp.Sale,
+			&rp.SaleReturn,
+			&rp.OrderCount,
+			&rp.ItemCount,
+		); err != nil {
+			return nil, fmt.Errorf("row scan failed: %w", err)
+		}
+		report = append(report, &rp)
+	}
+
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("row iteration error: %w", err)
+	}
+
+	return report, nil
+}
+
+// GetAllWorkersProgressReport gives a progress summary for all workers in a branch
+// grouped by day, week, month, or year — based on data from employees_progress table.
+func (r *ReportRepo) GetAllWorkersProgressReport(
+	ctx context.Context,
+	branchID int64,
+	startDate, endDate time.Time,
+	reportType string,
+) ([]*models.WorkerProgressReport, error) {
+
+	var report []*models.WorkerProgressReport
+
+	// Determine grouping format based on reportType
+	var dateSelect, dateGroupExpr string
+	switch reportType {
+	case "daily":
+		dateSelect = "to_char(ep.sheet_date, 'YYYY-MM-DD') AS date_label"
+		dateGroupExpr = "to_char(ep.sheet_date, 'YYYY-MM-DD')"
+	case "weekly":
+		dateSelect = "to_char(ep.sheet_date, 'IYYY-IW') AS date_label"
+		dateGroupExpr = "to_char(ep.sheet_date, 'IYYY-IW')"
+	case "monthly":
+		dateSelect = "to_char(ep.sheet_date, 'YYYY-MM') AS date_label"
+		dateGroupExpr = "to_char(ep.sheet_date, 'YYYY-MM')"
+	case "yearly":
+		dateSelect = "to_char(ep.sheet_date, 'YYYY') AS date_label"
+		dateGroupExpr = "to_char(ep.sheet_date, 'YYYY')"
+	default:
+		return nil, fmt.Errorf("invalid reportType: %s", reportType)
+	}
+
+	// Build GROUP BY and ORDER BY dynamically
+	groupBy := fmt.Sprintf("e.id, %s", dateGroupExpr)
+	orderBy := fmt.Sprintf("%s, e.name", dateGroupExpr)
+
+	// Final query: uses LEFT JOIN to include workers with no progress entries
+	query := fmt.Sprintf(`
+        SELECT
+            e.id AS employee_id,
+            e.name,
+            e.mobile,
+            e.email,
+            e.base_salary,
+            %s,
+            COALESCE(SUM(ep.production_units), 0) AS total_production_units,
+            COALESCE(SUM(ep.overtime_hours), 0)   AS total_overtime_hours,
+            COALESCE(SUM(ep.advance_payment), 0)  AS total_advance_payment,
+            COUNT(ep.id) FILTER (WHERE ep.production_units > 0 OR ep.overtime_hours > 0) AS active_days
+		FROM employees_progress ep
+        LEFT JOIN employees e
+            ON e.id = ep.employee_id
+            AND ep.sheet_date BETWEEN $2 AND $3
+            AND ep.branch_id = $1
+        WHERE e.branch_id = $1 AND e.role = 'worker'
+        GROUP BY %s, e.id, e.name, e.mobile, e.email, e.base_salary
+        ORDER BY %s;
+    `, dateSelect, groupBy, orderBy)
+
+	rows, err := r.db.Query(ctx, query, branchID, startDate, endDate)
+	if err != nil {
+		return nil, fmt.Errorf("query execution failed: %w", err)
+	}
+	defer rows.Close()
+
+	for rows.Next() {
+		var rp models.WorkerProgressReport
+		if err := rows.Scan(
 			&rp.WorkerID,
 			&rp.WorkerName,
 			&rp.Mobile,
 			&rp.Email,
 			&rp.BaseSalary,
 			&rp.Date,
-			&rp.PresentDays,
-			&rp.TotalAdvancePayment,
 			&rp.TotalProductionUnits,
 			&rp.TotalOvertimeHours,
-		)
-		if err != nil {
+			&rp.TotalAdvancePayment,
+			&rp.PresentDays, // renamed from active_days
+		); err != nil {
 			return nil, fmt.Errorf("row scan failed: %w", err)
 		}
-		report = append(report, rp)
+		report = append(report, &rp)
 	}
 
 	if err := rows.Err(); err != nil {
