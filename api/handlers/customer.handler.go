@@ -98,37 +98,6 @@ func (c *CustomerHandler) UpdateCustomerInfo(w http.ResponseWriter, r *http.Requ
 	utils.WriteJSON(w, http.StatusOK, resp)
 }
 
-// -------------------- Update Customer Due Amount --------------------
-func (c *CustomerHandler) UpdateCustomerDueAmount(w http.ResponseWriter, r *http.Request) {
-	var input struct {
-		ID        int64   `json:"id"`
-		DueAmount float64 `json:"due_amount"`
-	}
-
-	if err := utils.ReadJSON(w, r, &input); err != nil {
-		c.errorLog.Println("ERROR_01_UpdateCustomerDueAmount:", err)
-		utils.BadRequest(w, err)
-		return
-	}
-
-	if err := c.DB.UpdateCustomerDueAmount(r.Context(), input.ID, input.DueAmount); err != nil {
-		c.errorLog.Println("ERROR_02_UpdateCustomerDueAmount:", err)
-		utils.BadRequest(w, err)
-		return
-	}
-
-	resp := struct {
-		Error   bool   `json:"error"`
-		Status  string `json:"status"`
-		Message string `json:"message"`
-	}{
-		Error:   false,
-		Message: "Customer due amount updated successfully",
-	}
-
-	utils.WriteJSON(w, http.StatusOK, resp)
-}
-
 // -------------------- Update Customer Status --------------------
 func (c *CustomerHandler) UpdateCustomerStatus(w http.ResponseWriter, r *http.Request) {
 	var input struct {
@@ -422,4 +391,37 @@ func (c *CustomerHandler) GetCustomersWithDueHandler(w http.ResponseWriter, r *h
 		"status":    "success",
 		"customers": customers,
 	})
+}
+
+// -------------------- Deduct Customer Due Amount --------------------
+func (c *CustomerHandler) DeductCustomerDueAmount(w http.ResponseWriter, r *http.Request) {
+	branchID := utils.GetBranchID(r)
+	if branchID == 0 {
+		c.errorLog.Println("ERROR_01_DeductCustomerDueAmount: Branch id not found")
+		utils.BadRequest(w, errors.New("Branch ID not found. Please include 'X-Branch-ID' header, e.g., X-Branch-ID: 1"))
+		return
+	}
+	var requestBody struct {
+		CustomerID int64   `json:"customer_id"`
+		Amount     float64 `json:"amount"`
+	}
+	c.infoLog.Println(branchID, requestBody)
+	err := utils.ReadJSON(w, r, &requestBody)
+	if err != nil {
+		c.errorLog.Println("ERROR_01_DeductCustomerDueAmount:", err)
+		utils.BadRequest(w, err)
+		return
+	}
+
+	err = c.DB.DeductCustomerDueAmount(r.Context(), requestBody.CustomerID, branchID, requestBody.Amount)
+	if err != nil {
+		c.errorLog.Println("ERROR_02_DeductCustomerDueAmount:", err)
+		utils.BadRequest(w, err)
+		return
+	}
+
+	var resp models.Response
+	resp.Error = false
+	resp.Message = "Amount received successfully"
+	utils.WriteJSON(w, http.StatusOK, resp)
 }

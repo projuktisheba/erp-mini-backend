@@ -119,7 +119,7 @@ func (app *application) routes() http.Handler {
 		r.Get("/customer", app.Handlers.Customer.GetCustomerByID)
 		r.Post("/customer", app.Handlers.Customer.AddCustomer)
 		r.Put("/customer", app.Handlers.Customer.UpdateCustomerInfo)
-		r.Put("/customer/due", app.Handlers.Customer.UpdateCustomerDueAmount)
+		r.Put("/customer/due/deduct", app.Handlers.Customer.DeductCustomerDueAmount)
 		r.Put("/customer/status", app.Handlers.Customer.UpdateCustomerStatus)
 		r.Get("/customers", app.Handlers.Customer.GetCustomers)
 		r.Get("/customers/filter", app.Handlers.Customer.FilterCustomersByName)
@@ -178,6 +178,7 @@ func (app *application) routes() http.Handler {
 	protected.Route("/api/v1/reports", func(r chi.Router) {
 		r.Get("/dashboard/orders/overview", app.Handlers.Report.GetOrderOverView)
 		r.Get("/employee/progress", app.Handlers.Report.GetEmployeeProgressReport)
+		r.Get("/employee/salaries", app.Handlers.Report.GetSalaryListHandler)
 		r.Get("/worker/progress", app.Handlers.Report.GetWorkerProgressReport)
 		r.Get("/branch", app.Handlers.Report.GetBranchReport)
 	})

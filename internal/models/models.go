@@ -299,7 +299,6 @@ type WorkerProgressReport struct {
 	Email                string  `json:"email"`
 	BaseSalary           float64 `json:"base_salary"`
 	Date                 string  `json:"date"`
-	PresentDays          int     `json:"present_days"`
 	TotalAdvancePayment  float64 `json:"total_advance_payment"`
 	TotalProductionUnits float64 `json:"total_production_units"`
 	TotalOvertimeHours   float64 `json:"total_overtime_hours"`
@@ -328,7 +327,6 @@ type SalespersonProgress struct {
 	SaleAmount       float64   `json:"sale_amount"`
 	SaleReturnAmount float64   `json:"sale_return_amount"`
 	OrderCount       int64     `json:"order_count"`
-	ItemCount        int64     `json:"item_count"`
 	Salary           float64   `json:"salary"`
 }
 
@@ -341,4 +339,14 @@ type WorkerProgress struct {
 	OvertimeHours   int16     `json:"overtime_hours"`
 	AdvancePayment  float64   `json:"advance_payment"`
 	Salary          float64   `json:"salary"`
+}
+
+type SalaryRecord struct {
+    EmployeeID   int64     `json:"employee_id"`
+    EmployeeName string    `json:"employee_name"`
+    Role         string    `json:"role"`
+    BaseSalary   float64   `json:"base_salary"`
+    OvertimeRate float64   `json:"overtime_rate"`
+    TotalSalary  float64   `json:"total_salary"`
+    SheetDate    time.Time `json:"sheet_date"`
 }

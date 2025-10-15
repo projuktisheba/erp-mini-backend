@@ -109,19 +109,32 @@ func (s *CustomerRepo) UpdateCustomerInfo(ctx context.Context, customer *models.
 	return &updatedAt, nil
 }
 
-// 3. UpdateCustomerDueAmount updates only the due_amount.
-func (s *CustomerRepo) UpdateCustomerDueAmount(ctx context.Context, id int64, dueAmount float64) error {
-	query := `UPDATE customers SET due_amount = $1, updated_at = CURRENT_TIMESTAMP WHERE id = $2;`
+// 3. DeductCustomerDueAmount deducts the due amount of a customer.
+func (s *CustomerRepo) DeductCustomerDueAmount(ctx context.Context, customerID, branchID int64, deductedAmount float64) error {
+	tx, err := s.db.Begin(ctx)
+	if err != nil {
+		return err
+	}
+	query := `UPDATE customers SET due_amount = due_amount - $1, updated_at = CURRENT_TIMESTAMP WHERE id = $2;`
 
-	res, err := s.db.Exec(ctx, query, dueAmount, id)
+	res, err := tx.Exec(ctx, query, deductedAmount, customerID)
 	if err != nil {
 		return fmt.Errorf("error updating due amount: %w", err)
 	}
 
 	if res.RowsAffected() == 0 {
-		return fmt.Errorf("customer with id %d not found", id)
+		return fmt.Errorf("customer with id %d not found", customerID)
 	}
-	return nil
+
+	err = SaveTopSheetTx(tx, ctx, &models.TopSheet{
+		Date: time.Now().UTC(),
+		BranchID: branchID,
+		Cash: deductedAmount,
+	})
+	if err != nil {
+		return err
+	}
+	return tx.Commit(ctx)
 }
 
 // 4. UpdateCustomerStatus updates active/inactive status.

@@ -215,8 +215,7 @@ func (r *ReportRepo) GetAllWorkersProgressReport(
             %s,
             COALESCE(SUM(ep.production_units), 0) AS total_production_units,
             COALESCE(SUM(ep.overtime_hours), 0)   AS total_overtime_hours,
-            COALESCE(SUM(ep.advance_payment), 0)  AS total_advance_payment,
-            COUNT(ep.id) FILTER (WHERE ep.production_units > 0 OR ep.overtime_hours > 0) AS active_days
+            COALESCE(SUM(ep.advance_payment), 0)  AS total_advance_payment
 		FROM employees_progress ep
         LEFT JOIN employees e
             ON e.id = ep.employee_id
@@ -245,7 +244,6 @@ func (r *ReportRepo) GetAllWorkersProgressReport(
 			&rp.TotalProductionUnits,
 			&rp.TotalOvertimeHours,
 			&rp.TotalAdvancePayment,
-			&rp.PresentDays, // renamed from active_days
 		); err != nil {
 			return nil, fmt.Errorf("row scan failed: %w", err)
 		}
@@ -310,3 +308,60 @@ func (r *ReportRepo) GetBranchReport(ctx context.Context, branchID int64, startD
 
 	return sheets, nil
 }
+
+func (r *ReportRepo) GetSalaryList(ctx context.Context, branchID, employeeID int64, startDate, endDate string) ([]*models.SalaryRecord, error) {
+	query := `
+		SELECT 
+			ep.employee_id,
+			e.name,
+			e.role,
+			e.base_salary,
+			ep.overtime_hours,
+			ep.salary,
+			ep.sheet_date
+		FROM employees_progress ep
+		LEFT JOIN employees e ON e.id = ep.employee_id
+		WHERE ep.branch_id = $1
+	`
+	args := []any{branchID}
+	argPos := 2 // next placeholder index
+
+	if employeeID != 0 {
+		query += fmt.Sprintf(" AND ep.employee_id = $%d" , argPos)
+		args = append(args, employeeID)
+		argPos++
+	}
+
+	if startDate != "" && endDate != "" {
+		query += fmt.Sprintf(" AND ep.sheet_date BETWEEN $%d AND $%d", argPos, argPos+1)
+		args = append(args, startDate, endDate)
+		argPos += 2
+	}
+
+	query += " ORDER BY ep.sheet_date ASC"
+
+	rows, err := r.db.Query(ctx, query, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var salaries []*models.SalaryRecord
+	for rows.Next() {
+		var s models.SalaryRecord
+		if err := rows.Scan(
+			&s.EmployeeID,
+			&s.EmployeeName,
+			&s.Role,
+			&s.BaseSalary,
+			&s.OvertimeRate,
+			&s.TotalSalary,
+			&s.SheetDate,
+		); err != nil {
+			return nil, err
+		}
+		salaries = append(salaries, &s)
+	}
+	return salaries, nil
+}
+

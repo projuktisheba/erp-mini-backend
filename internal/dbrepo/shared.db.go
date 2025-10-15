@@ -50,14 +50,12 @@ func UpdateSalespersonProgressReportTx(tx pgx.Tx, ctx context.Context, ts *model
 	INSERT INTO employees_progress (
 		sheet_date, branch_id, employee_id,
 		sale_amount, sale_return_amount,
-		order_count, item_count,
-		salary
-	) VALUES ($1,$2,$3,$4,$5,$6,$7,$8)
+		order_count, salary
+	) VALUES ($1,$2,$3,$4,$5,$6,$7)
 	ON CONFLICT (sheet_date, employee_id) DO UPDATE SET
 		sale_amount        = employees_progress.sale_amount + EXCLUDED.sale_amount,
 		sale_return_amount = employees_progress.sale_return_amount + EXCLUDED.sale_return_amount,
-		order_count        = employees_progress.order_count + EXCLUDED.order_count,
-		item_count         = employees_progress.item_count + EXCLUDED.item_count;
+		order_count        = employees_progress.order_count + EXCLUDED.order_count;
 	`
 	_, err := tx.Exec(ctx, query,
 		ts.Date,
@@ -66,7 +64,6 @@ func UpdateSalespersonProgressReportTx(tx pgx.Tx, ctx context.Context, ts *model
 		ts.SaleAmount,
 		ts.SaleReturnAmount,
 		ts.OrderCount,
-		ts.ItemCount,
 		ts.Salary,
 	)
 	return err

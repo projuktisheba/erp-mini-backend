@@ -262,12 +262,13 @@ CREATE TABLE order_items (
 );
 CREATE TABLE transactions (
     transaction_id BIGSERIAL PRIMARY KEY,
+    memo_no VARCHAR(50) DEFAULT '',
     branch_id BIGINT NOT NULL REFERENCES branches(id) ON DELETE CASCADE,
     from_entity_id BIGINT NOT NULL,
-    from_entity_type VARCHAR(50),  -- optional, can be 'account', 'customer', 'employee', etc.
+    from_entity_type VARCHAR(50),  -- optional, can be 'accounts', 'customers', 'employee's, etc.
     
     to_entity_id BIGINT NOT NULL,
-    to_entity_type VARCHAR(50),    -- optional
+    to_entity_type VARCHAR(50),    -- optional, can be 'accounts', 'customers', 'employee's, etc.
     
     amount NUMERIC(12,2) NOT NULL,
     transaction_type VARCHAR(20) NOT NULL 

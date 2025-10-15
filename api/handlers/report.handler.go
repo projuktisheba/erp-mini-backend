@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 
@@ -180,7 +181,7 @@ func (rp *ReportHandler) GetWorkerProgressReport(w http.ResponseWriter, r *http.
 	}
 
 	// Fetch report from repo
-	empReport, err := rp.DB.GetAllWorkersProgressReport(r.Context(), branchID, startDate, endDate, reportType)
+	workerReports, err := rp.DB.GetAllWorkersProgressReport(r.Context(), branchID, startDate, endDate, reportType)
 	if err != nil {
 		rp.errorLog.Println("ERROR_03_GetWorkerProgressReport: ", err)
 		utils.BadRequest(w, err)
@@ -189,13 +190,13 @@ func (rp *ReportHandler) GetWorkerProgressReport(w http.ResponseWriter, r *http.
 
 	// Prepare response
 	resp := struct {
-		Error                  bool                           `json:"error"`
-		Message                string                         `json:"message"`
-		EmployeeProgressReport []*models.WorkerProgressReport `json:"report"`
+		Error         bool                           `json:"error"`
+		Message       string                         `json:"message"`
+		WorkerReports []*models.WorkerProgressReport `json:"report"`
 	}{
-		Error:                  false,
-		Message:                "Progress report created successfully",
-		EmployeeProgressReport: empReport,
+		Error:         false,
+		Message:       "Progress report created successfully",
+		WorkerReports: workerReports,
 	}
 
 	utils.WriteJSON(w, http.StatusOK, resp)
@@ -262,4 +263,51 @@ func (rp *ReportHandler) GetBranchReport(w http.ResponseWriter, r *http.Request)
 
 	utils.WriteJSON(w, http.StatusOK, resp)
 
+}
+
+// GET /api/salaries?employee_id=123
+// GetSalaryListHandler list all rows of employee's salary
+// GetSalaryListHandler handles GET /reports/salaries
+func (h *ReportHandler) GetSalaryListHandler(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+	branchID := utils.GetBranchID(r)
+	if branchID == 0 {
+		utils.BadRequest(w, errors.New("Branch ID not found. Include 'X-Branch-ID' header"))
+		return
+	}
+
+	// Parse query params
+	employeeIDStr := r.URL.Query().Get("employee_id")
+	startDate := r.URL.Query().Get("start_date")
+	endDate := r.URL.Query().Get("end_date")
+
+	var employeeID int64
+	if employeeIDStr != "" {
+		id, err := strconv.ParseInt(employeeIDStr, 10, 64)
+		if err != nil {
+			utils.BadRequest(w, errors.New("Invalid employee_id"))
+			return
+		}
+		employeeID = id
+	}
+
+	// Fetch salary list
+	salaries, err := h.DB.GetSalaryList(ctx, branchID, employeeID, startDate, endDate)
+	if err != nil {
+		h.errorLog.Println("ERROR fetching salaries:", err)
+		utils.ServerError(w, err)
+		return
+	}
+
+	// Return response
+	var resp struct {
+		Error   bool                   `json:"error"`
+		Message string                 `json:"message"`
+		Report  []*models.SalaryRecord `json:"report"`
+	}
+	resp.Error = false
+	resp.Message = "Salary list fetched successfully"
+	resp.Report = salaries
+
+	utils.WriteJSON(w, http.StatusOK, resp)
 }

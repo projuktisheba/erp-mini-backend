@@ -73,30 +73,29 @@ func (r *OrderRepo) CreateOrder(ctx context.Context, newOrder *models.Order) err
 		if err != nil {
 			return fmt.Errorf("insert transaction: %w", err)
 		}
-		// Update top_sheet => increase cash
-		topSheet := &models.TopSheet{
-			Date:       newOrder.OrderDate,
-			BranchID:   newOrder.BranchID,
-			OrderCount: 1,
-		}
+	}
+	// Update top_sheet => increase cash
+	topSheet := &models.TopSheet{
+		Date:       newOrder.OrderDate,
+		BranchID:   newOrder.BranchID,
+		OrderCount: 1,
+	}
 
-		// safer: lookup account type (cash/bank)
-		var acctType string
-		err = tx.QueryRow(ctx, `SELECT type FROM accounts WHERE id=$1`, *newOrder.PaymentAccountID).Scan(&acctType)
-		if err != nil {
-			return fmt.Errorf("lookup account type: %w", err)
-		}
-		if acctType == "bank" {
-			topSheet.Bank = newOrder.AdvancePaymentAmount
-		} else {
-			topSheet.Cash = newOrder.AdvancePaymentAmount
-		}
+	// safer: lookup account type (cash/bank)
+	var acctType string
+	err = tx.QueryRow(ctx, `SELECT type FROM accounts WHERE id=$1`, *newOrder.PaymentAccountID).Scan(&acctType)
+	if err != nil {
+		return fmt.Errorf("lookup account type: %w", err)
+	}
+	if acctType == "bank" {
+		topSheet.Bank = newOrder.AdvancePaymentAmount
+	} else {
+		topSheet.Cash = newOrder.AdvancePaymentAmount
+	}
 
-		err = SaveTopSheetTx(tx, ctx, topSheet) // <-- must accept tx, not db
-		if err != nil {
-			return fmt.Errorf("save topsheet: %w", err)
-		}
-
+	err = SaveTopSheetTx(tx, ctx, topSheet)
+	if err != nil {
+		return fmt.Errorf("save top-sheet: %w", err)
 	}
 
 	// --- Step 5: Update customer due ---
@@ -110,6 +109,19 @@ func (r *OrderRepo) CreateOrder(ctx context.Context, newOrder *models.Order) err
 		if err != nil {
 			return fmt.Errorf("update customer due: %w", err)
 		}
+	}
+
+	// Step 6: Update salesperson daily progress record
+	salespersonProgress := models.SalespersonProgress{
+		Date:       newOrder.OrderDate,
+		BranchID:   newOrder.BranchID,
+		EmployeeID: newOrder.SalespersonID,
+		OrderCount: 1,
+		// SaleAmount: newOrder.TotalPayableAmount, // DEBUG uncomment if client wants to add
+	}
+	err = UpdateSalespersonProgressReportTx(tx, ctx, &salespersonProgress)
+	if err != nil {
+		return fmt.Errorf("failed to update employee progress: %w", err)
 	}
 
 	return tx.Commit(ctx)
@@ -167,6 +179,60 @@ func (r *OrderRepo) UpdateOrder(ctx context.Context, newOrder *models.Order) err
 			return fmt.Errorf("scan old item: %w", err)
 		}
 		oldItems[it.ProductID] = it
+	}
+
+	// --- Step 5: Update orders table ---
+	_, err = tx.Exec(ctx, `
+        UPDATE orders
+        SET order_date=$2, salesperson_id=$3, customer_id=$4,
+            total_payable_amount=$5, advance_payment_amount=$6, payment_account_id=$7,
+            status=$8, delivery_date=$9, exit_date=$10, notes=$11, updated_at=CURRENT_TIMESTAMP
+        WHERE id=$12
+    `, newOrder.OrderDate, newOrder.SalespersonID, newOrder.CustomerID,
+		newOrder.TotalPayableAmount, newOrder.AdvancePaymentAmount, newOrder.PaymentAccountID,
+		newOrder.Status, newOrder.DeliveryDate, newOrder.ExitDate, newOrder.Notes, newOrder.ID)
+	if err != nil {
+		return fmt.Errorf("update order: %w", err)
+	}
+
+	// --- Step 6: Reconcile order_items ---
+	newItems := map[int64]*models.OrderItem{}
+	for _, it := range newOrder.Items {
+		newItems[it.ProductID] = it
+	}
+
+	// Insert or update items
+	for pid, it := range newItems {
+		if old, ok := oldItems[pid]; ok {
+			if old.Quantity != it.Quantity || old.TotalPrice != it.TotalPrice {
+				_, err := tx.Exec(ctx, `
+                    UPDATE order_items
+                    SET quantity=$1, subtotal=$2
+                    WHERE id=$3
+                `, it.Quantity, it.TotalPrice, old.ID)
+				if err != nil {
+					return fmt.Errorf("update order_item: %w", err)
+				}
+			}
+		} else {
+			_, err := tx.Exec(ctx, `
+                INSERT INTO order_items (memo_no, product_id, quantity, subtotal)
+                VALUES ($1,$2,$3,$4)
+            `, newOrder.MemoNo, it.ProductID, it.Quantity, it.TotalPrice) // FIX: use MemoNo
+			if err != nil {
+				return fmt.Errorf("insert order_item: %w", err)
+			}
+		}
+	}
+
+	// Delete removed items
+	for pid, old := range oldItems {
+		if _, ok := newItems[pid]; !ok {
+			_, err := tx.Exec(ctx, `DELETE FROM order_items WHERE id=$1`, old.ID)
+			if err != nil {
+				return fmt.Errorf("delete order_item: %w", err)
+			}
+		}
 	}
 
 	// --- Step 3: Adjust account balance if advance changed ---
@@ -246,60 +312,6 @@ func (r *OrderRepo) UpdateOrder(ctx context.Context, newOrder *models.Order) err
 		}
 	}
 
-	// --- Step 5: Update orders table ---
-	_, err = tx.Exec(ctx, `
-        UPDATE orders
-        SET memo_no=$1, order_date=$2, salesperson_id=$3, customer_id=$4,
-            total_payable_amount=$5, advance_payment_amount=$6, payment_account_id=$7,
-            status=$8, delivery_date=$9, exit_date=$10, notes=$11, updated_at=CURRENT_TIMESTAMP
-        WHERE id=$12
-    `, newOrder.MemoNo, newOrder.OrderDate, newOrder.SalespersonID, newOrder.CustomerID,
-		newOrder.TotalPayableAmount, newOrder.AdvancePaymentAmount, newOrder.PaymentAccountID,
-		newOrder.Status, newOrder.DeliveryDate, newOrder.ExitDate, newOrder.Notes, newOrder.ID)
-	if err != nil {
-		return fmt.Errorf("update order: %w", err)
-	}
-
-	// --- Step 6: Reconcile order_items ---
-	newItems := map[int64]*models.OrderItem{}
-	for _, it := range newOrder.Items {
-		newItems[it.ProductID] = it
-	}
-
-	// Insert or update items
-	for pid, it := range newItems {
-		if old, ok := oldItems[pid]; ok {
-			if old.Quantity != it.Quantity || old.TotalPrice != it.TotalPrice {
-				_, err := tx.Exec(ctx, `
-                    UPDATE order_items
-                    SET quantity=$1, subtotal=$2
-                    WHERE id=$3
-                `, it.Quantity, it.TotalPrice, old.ID)
-				if err != nil {
-					return fmt.Errorf("update order_item: %w", err)
-				}
-			}
-		} else {
-			_, err := tx.Exec(ctx, `
-                INSERT INTO order_items (memo_no, product_id, quantity, subtotal)
-                VALUES ($1,$2,$3,$4)
-            `, newOrder.MemoNo, it.ProductID, it.Quantity, it.TotalPrice) // FIX: use MemoNo
-			if err != nil {
-				return fmt.Errorf("insert order_item: %w", err)
-			}
-		}
-	}
-
-	// Delete removed items
-	for pid, old := range oldItems {
-		if _, ok := newItems[pid]; !ok {
-			_, err := tx.Exec(ctx, `DELETE FROM order_items WHERE id=$1`, old.ID)
-			if err != nil {
-				return fmt.Errorf("delete order_item: %w", err)
-			}
-		}
-	}
-
 	// --- Step 7: Commit transaction ---
 	if err := tx.Commit(ctx); err != nil {
 		return fmt.Errorf("commit tx: %w", err)
@@ -333,7 +345,7 @@ func (r *OrderRepo) CheckoutOrder(ctx context.Context, orderID int64, branchID i
 
 	// Update top_sheet -> increase checkout
 	topSheet := &models.TopSheet{
-		Date:     time.Now(),
+		Date:     time.Now().UTC(),
 		BranchID: branchID,
 		Checkout: 1,
 	}
@@ -358,12 +370,11 @@ func (r *OrderRepo) CancelOrder(ctx context.Context, orderID int64, branchID int
 		UPDATE orders
 		SET status='cancelled', updated_at=CURRENT_TIMESTAMP
 		WHERE id=$1
-		RETURNING id, customer_id, advance_payment_amount, total_payable_amount, payment_account_id
-	`, orderID).Scan(&order.ID, &order.CustomerID, &order.AdvancePaymentAmount, &order.TotalPayableAmount, &order.PaymentAccountID)
+		RETURNING id, memo_no, customer_id, advance_payment_amount, total_payable_amount, payment_account_id
+	`, orderID).Scan(&order.ID, &order.MemoNo, &order.CustomerID, &order.AdvancePaymentAmount, &order.TotalPayableAmount, &order.PaymentAccountID)
 	if err != nil {
 		return fmt.Errorf("update order to cancelled: %w", err)
 	}
-
 	// Revert account balance + refund transaction
 	if order.AdvancePaymentAmount > 0 && order.PaymentAccountID != nil {
 		_, err := tx.Exec(ctx, `
@@ -386,8 +397,9 @@ func (r *OrderRepo) CancelOrder(ctx context.Context, orderID int64, branchID int
 
 		// TopSheet -> Decrease cash/bank
 		topSheet := &models.TopSheet{
-			Date:     time.Now(),
-			BranchID: branchID,
+			Date:       time.Now(),
+			BranchID:   branchID,
+			OrderCount: -1,
 		}
 		// safer: lookup account type (cash/bank)
 		var acctType string
@@ -402,6 +414,18 @@ func (r *OrderRepo) CancelOrder(ctx context.Context, orderID int64, branchID int
 		}
 		if err := SaveTopSheetTx(tx, ctx, topSheet); err != nil {
 			return fmt.Errorf("save topsheet: %w", err)
+		}
+		// Step 6: Update salesperson daily progress record
+		salespersonProgress := models.SalespersonProgress{
+			Date:       order.OrderDate,
+			BranchID:   order.BranchID,
+			EmployeeID: order.SalespersonID,
+			OrderCount: -1,
+			// SaleAmount: order.TotalPayableAmount, // DEBUG uncomment if client wants to add
+		}
+		err = UpdateSalespersonProgressReportTx(tx, ctx, &salespersonProgress)
+		if err != nil {
+			return fmt.Errorf("failed to update employee progress: %w", err)
 		}
 	}
 
@@ -483,6 +507,7 @@ func (r *OrderRepo) ConfirmDelivery(ctx context.Context, orderID int64, branchID
 	topSheet := &models.TopSheet{
 		Date:     time.Now(),
 		BranchID: branchID,
+		Delivery: 1,
 	}
 	// safer: lookup account type (cash/bank)
 	var acctType string
