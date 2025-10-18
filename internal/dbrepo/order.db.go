@@ -29,15 +29,19 @@ func (r *OrderRepo) CreateOrder(ctx context.Context, newOrder *models.Order) err
 
 	// set values
 	newOrder.Status = "pending"
+	totalItems := int64(0)
+	for _, it := range newOrder.Items {
+		totalItems += it.Quantity
+	}
 	// --- Step 1: Insert order ---
 	err = tx.QueryRow(ctx, `
-        INSERT INTO orders (memo_no, branch_id, order_date, salesperson_id, customer_id, total_payable_amount, advance_payment_amount, payment_account_id, status, delivery_date, exit_date, notes)
-        VALUES (TO_CHAR(CURRENT_DATE, 'YYMM') || '-' || LPAD(NEXTVAL('orders_id_seq')::TEXT, 4, '0') ,$1,$2,$3,$4,$5,$6,$7,$8,$9,$10, $11)
+        INSERT INTO orders (memo_no, branch_id, order_date, salesperson_id, customer_id, total_payable_amount, advance_payment_amount, payment_account_id, status, delivery_date, exit_date, notes, total_items)
+        VALUES (LPAD(NEXTVAL('order_memo_seq')::TEXT, 5, '0') ,$1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)
         RETURNING id, memo_no
     `,
 		newOrder.BranchID, newOrder.OrderDate, newOrder.SalespersonID, newOrder.CustomerID,
 		newOrder.TotalPayableAmount, newOrder.AdvancePaymentAmount, newOrder.PaymentAccountID,
-		newOrder.Status, newOrder.DeliveryDate, newOrder.ExitDate, newOrder.Notes,
+		newOrder.Status, newOrder.DeliveryDate, newOrder.ExitDate, newOrder.Notes, totalItems,
 	).Scan(&newOrder.ID, &newOrder.MemoNo)
 	if err != nil {
 		return fmt.Errorf("insert order: %w", err)
@@ -67,9 +71,9 @@ func (r *OrderRepo) CreateOrder(ctx context.Context, newOrder *models.Order) err
 
 		// --- Step 4: Record transaction ---
 		_, err = tx.Exec(ctx, `
-            INSERT INTO transactions (from_entity_id, from_entity_type, to_entity_id, to_entity_type, amount, transaction_type, notes, branch_id)
-            VALUES ($1,'customers',$2,'accounts',$3,'payment','Advance payment for order', $4)
-        `, newOrder.CustomerID, *newOrder.PaymentAccountID, newOrder.AdvancePaymentAmount, newOrder.BranchID)
+            INSERT INTO transactions (from_entity_id, from_entity_type, to_entity_id, to_entity_type, amount, transaction_type, notes, branch_id, memo_no)
+            VALUES ($1,'customers',$2,'accounts',$3,'payment','Advance payment for order', $4, $5)
+        `, newOrder.CustomerID, *newOrder.PaymentAccountID, newOrder.AdvancePaymentAmount, newOrder.BranchID, newOrder.MemoNo)
 		if err != nil {
 			return fmt.Errorf("insert transaction: %w", err)
 		}
@@ -78,7 +82,8 @@ func (r *OrderRepo) CreateOrder(ctx context.Context, newOrder *models.Order) err
 	topSheet := &models.TopSheet{
 		Date:       newOrder.OrderDate,
 		BranchID:   newOrder.BranchID,
-		OrderCount: 1,
+		OrderCount: totalItems,
+		Pending:    totalItems,
 	}
 
 	// safer: lookup account type (cash/bank)
@@ -116,7 +121,7 @@ func (r *OrderRepo) CreateOrder(ctx context.Context, newOrder *models.Order) err
 		Date:       newOrder.OrderDate,
 		BranchID:   newOrder.BranchID,
 		EmployeeID: newOrder.SalespersonID,
-		OrderCount: 1,
+		OrderCount: totalItems,
 		// SaleAmount: newOrder.TotalPayableAmount, // DEBUG uncomment if client wants to add
 	}
 	err = UpdateSalespersonProgressReportTx(tx, ctx, &salespersonProgress)
@@ -172,6 +177,7 @@ func (r *OrderRepo) UpdateOrder(ctx context.Context, newOrder *models.Order) err
 	}
 	defer rows.Close()
 
+	oldItemsCount := int64(0)
 	oldItems := map[int64]models.OrderItem{}
 	for rows.Next() {
 		var it models.OrderItem
@@ -179,27 +185,31 @@ func (r *OrderRepo) UpdateOrder(ctx context.Context, newOrder *models.Order) err
 			return fmt.Errorf("scan old item: %w", err)
 		}
 		oldItems[it.ProductID] = it
+		oldItemsCount += it.Quantity
 	}
-
+	newItemsCount := int64(0)
+	newItems := map[int64]*models.OrderItem{}
+	for _, it := range newOrder.Items {
+		newItems[it.ProductID] = it
+		newItemsCount += it.Quantity
+	}
+	//item differences
+	itemDiff := newItemsCount - oldItemsCount
 	// --- Step 5: Update orders table ---
 	_, err = tx.Exec(ctx, `
         UPDATE orders
         SET order_date=$2, salesperson_id=$3, customer_id=$4,
             total_payable_amount=$5, advance_payment_amount=$6, payment_account_id=$7,
-            status=$8, delivery_date=$9, exit_date=$10, notes=$11, updated_at=CURRENT_TIMESTAMP
-        WHERE id=$12
+            status=$8, delivery_date=$9, exit_date=$10, notes=$11, total_items=total_items+$12, updated_at=CURRENT_TIMESTAMP
+        WHERE id=$13
     `, newOrder.OrderDate, newOrder.SalespersonID, newOrder.CustomerID,
 		newOrder.TotalPayableAmount, newOrder.AdvancePaymentAmount, newOrder.PaymentAccountID,
-		newOrder.Status, newOrder.DeliveryDate, newOrder.ExitDate, newOrder.Notes, newOrder.ID)
+		newOrder.Status, newOrder.DeliveryDate, newOrder.ExitDate, newOrder.Notes, itemDiff, newOrder.ID)
 	if err != nil {
 		return fmt.Errorf("update order: %w", err)
 	}
 
 	// --- Step 6: Reconcile order_items ---
-	newItems := map[int64]*models.OrderItem{}
-	for _, it := range newOrder.Items {
-		newItems[it.ProductID] = it
-	}
 
 	// Insert or update items
 	for pid, it := range newItems {
@@ -251,47 +261,55 @@ func (r *OrderRepo) UpdateOrder(ctx context.Context, newOrder *models.Order) err
 		if err != nil {
 			return fmt.Errorf("update account balance: %w", err)
 		}
+	}
 
-		// Update top_sheet
-		topSheet := &models.TopSheet{
-			Date:     newOrder.OrderDate,
-			BranchID: newOrder.BranchID,
-		}
+	// Update top_sheet
+	topSheet := &models.TopSheet{
+		Date:       newOrder.OrderDate,
+		BranchID:   newOrder.BranchID,
+		OrderCount: itemDiff,
+		Pending:    itemDiff,
+	}
 
-		// safer: lookup account type (cash/bank)
-		var acctType string
-		err = tx.QueryRow(ctx, `SELECT type FROM accounts WHERE id=$1`, *newOrder.PaymentAccountID).Scan(&acctType)
-		if err != nil {
-			return fmt.Errorf("lookup account type: %w", err)
-		}
-		if acctType == "bank" {
-			topSheet.Bank = advanceDiff
-		} else {
-			topSheet.Cash = advanceDiff
-		}
+	// safer: lookup account type (cash/bank)
+	var acctType string
+	err = tx.QueryRow(ctx, `SELECT type FROM accounts WHERE id=$1`, *newOrder.PaymentAccountID).Scan(&acctType)
+	if err != nil {
+		return fmt.Errorf("lookup account type: %w", err)
+	}
+	if acctType == "bank" {
+		topSheet.Bank = advanceDiff
+	} else {
+		topSheet.Cash = advanceDiff
+	}
 
-		err = SaveTopSheetTx(tx, ctx, topSheet)
-		if err != nil {
-			return fmt.Errorf("save topsheet: %w", err)
-		}
+	err = SaveTopSheetTx(tx, ctx, topSheet)
+	if err != nil {
+		return fmt.Errorf("save topsheet: %w", err)
+	}
 
-		// Insert transaction record
-		if advanceDiff > 0 {
-			// Payment: customer → account
-			_, err = tx.Exec(ctx, `
-                INSERT INTO transactions (from_entity_id, from_entity_type, to_entity_id, to_entity_type, amount, transaction_type, notes)
-                VALUES ($1,'customers',$2,'accounts',$3,'payment',$4)
-            `, newOrder.CustomerID, *newOrder.PaymentAccountID, advanceDiff, "Advance payment adjusted for order")
-		} else {
-			// Refund: account → customer
-			_, err = tx.Exec(ctx, `
-                INSERT INTO transactions (from_entity_id, from_entity_type, to_entity_id, to_entity_type, amount, transaction_type, notes)
-                VALUES ($1,'accounts',$2,'customers',$3,'refund',$4)
-            `, *newOrder.PaymentAccountID, newOrder.CustomerID, -advanceDiff, "Advance payment refund for order")
-		}
-		if err != nil {
-			return fmt.Errorf("insert transaction: %w", err)
-		}
+	_, err = tx.Exec(ctx, `
+		UPDATE transactions
+		SET 
+			from_entity_id = $1,
+			from_entity_type = $2,
+			to_entity_id = $3,
+			to_entity_type = $4,
+			amount = $5,
+			notes = $6,
+			updated_at = CURRENT_TIMESTAMP
+		WHERE memo_no = $7
+		`,
+		newOrder.CustomerID,           // $1
+		"customers",                   // $2
+		*newOrder.PaymentAccountID,    // $3
+		"accounts",                    // $4
+		newOrder.AdvancePaymentAmount, // $5
+		"Advance payment adjustment for order cancellation", // $6
+		newOrder.MemoNo, // $7
+	)
+	if err != nil {
+		return fmt.Errorf("update transaction: %w", err)
 	}
 
 	// --- Step 4: Adjust customer due ---
@@ -311,6 +329,18 @@ func (r *OrderRepo) UpdateOrder(ctx context.Context, newOrder *models.Order) err
 			return errors.New("invalid customer_id")
 		}
 	}
+	// Step 6: Update salesperson daily progress record
+	salespersonProgress := models.SalespersonProgress{
+		Date:       newOrder.OrderDate,
+		BranchID:   newOrder.BranchID,
+		EmployeeID: newOrder.SalespersonID,
+		OrderCount: itemDiff,
+		// SaleAmount: newOrder.TotalPayableAmount, // DEBUG uncomment if client wants to add
+	}
+	err = UpdateSalespersonProgressReportTx(tx, ctx, &salespersonProgress)
+	if err != nil {
+		return fmt.Errorf("failed to update employee progress: %w", err)
+	}
 
 	// --- Step 7: Commit transaction ---
 	if err := tx.Commit(ctx); err != nil {
@@ -327,27 +357,41 @@ func (r *OrderRepo) CheckoutOrder(ctx context.Context, orderID int64, branchID i
 		return fmt.Errorf("begin tx: %w", err)
 	}
 	defer tx.Rollback(ctx)
+	// First, get current status
+	var currentStatus string
+	err = tx.QueryRow(ctx, `SELECT status FROM orders WHERE id = $1`, orderID).Scan(&currentStatus)
+	if err != nil {
+		return fmt.Errorf("fetch current status: %w", err)
+	}
+
+	// Prevent invalid updates
+	if currentStatus != "pending" {
+		return fmt.Errorf("cannot mark the order as checkout with current status '%s'", currentStatus)
+	}
 
 	newStatus := "checkout"
-
+	memoNo := ""
 	// Update the order status
-	res, err := tx.Exec(ctx, `
+	err = tx.QueryRow(ctx, `
         UPDATE orders
         SET status=$1, updated_at=CURRENT_TIMESTAMP
         WHERE id=$2
-    `, newStatus, orderID)
+		RETURNING memo_no
+    `, newStatus, orderID).Scan(&memoNo)
 	if err != nil {
 		return fmt.Errorf("update order status: %w", err)
 	}
-	if res.RowsAffected() == 0 {
-		return fmt.Errorf("order id %d not found", orderID)
+	totalItems := int64(0)
+	err = tx.QueryRow(ctx, `SELECT SUM(COALESCE(quantity, 0)) FROM order_items WHERE memo_no=$1`, memoNo).Scan(&totalItems)
+	if err != nil {
+		return fmt.Errorf("Unable to count total items: %w", err)
 	}
-
 	// Update top_sheet -> increase checkout
 	topSheet := &models.TopSheet{
 		Date:     time.Now().UTC(),
 		BranchID: branchID,
-		Checkout: 1,
+		Pending:  -totalItems,
+		Checkout: totalItems,
 	}
 	if err := SaveTopSheetTx(tx, ctx, topSheet); err != nil {
 		return fmt.Errorf("save topsheet: %w", err)
@@ -364,17 +408,46 @@ func (r *OrderRepo) CancelOrder(ctx context.Context, orderID int64, branchID int
 	}
 	defer tx.Rollback(ctx)
 
+	// First, get current status
+	var currentStatus string
+	err = tx.QueryRow(ctx, `SELECT status FROM orders WHERE id = $1`, orderID).Scan(&currentStatus)
+	if err != nil {
+		return fmt.Errorf("fetch current status: %w", err)
+	}
+
+	// Prevent invalid updates
+	if currentStatus == "cancelled" || currentStatus == "delivery" {
+		return fmt.Errorf("cannot cancel order with current status '%s'", currentStatus)
+	}
+
 	// Load & mark order cancelled
 	var order models.Order
 	err = tx.QueryRow(ctx, `
 		UPDATE orders
-		SET status='cancelled', updated_at=CURRENT_TIMESTAMP
-		WHERE id=$1
-		RETURNING id, memo_no, customer_id, advance_payment_amount, total_payable_amount, payment_account_id
-	`, orderID).Scan(&order.ID, &order.MemoNo, &order.CustomerID, &order.AdvancePaymentAmount, &order.TotalPayableAmount, &order.PaymentAccountID)
+		SET status = 'cancelled',
+			updated_at = CURRENT_TIMESTAMP
+		WHERE id = $1
+		RETURNING id, memo_no, customer_id, salesperson_id, advance_payment_amount, total_payable_amount, payment_account_id, items_delivered
+	`, orderID).Scan(
+		&order.ID,
+		&order.MemoNo,
+		&order.CustomerID,
+		&order.SalespersonID,
+		&order.AdvancePaymentAmount,
+		&order.TotalPayableAmount,
+		&order.PaymentAccountID,
+		&order.ItemsDelivered,
+	)
 	if err != nil {
 		return fmt.Errorf("update order to cancelled: %w", err)
 	}
+	//count total items
+	totalItems := int64(0)
+	err = tx.QueryRow(ctx, `SELECT SUM(COALESCE(quantity, 0)) FROM order_items WHERE memo_no=$1`, order.MemoNo).Scan(&totalItems)
+	if err != nil {
+		return fmt.Errorf("unable to count total items: %w", err)
+	}
+	totalItems -= order.ItemsDelivered
 	// Revert account balance + refund transaction
 	if order.AdvancePaymentAmount > 0 && order.PaymentAccountID != nil {
 		_, err := tx.Exec(ctx, `
@@ -388,47 +461,54 @@ func (r *OrderRepo) CancelOrder(ctx context.Context, orderID int64, branchID int
 
 		_, err = tx.Exec(ctx, `
 			INSERT INTO transactions (from_entity_id, from_entity_type, to_entity_id, to_entity_type,
-									  amount, transaction_type, notes)
-			VALUES ($1,'accounts',$2,'customers',$3,'refund','Refund for canceled order')
-		`, *order.PaymentAccountID, order.CustomerID, order.AdvancePaymentAmount)
+									  amount, transaction_type, notes, memo_no, branch_id)
+			VALUES ($1,'accounts',$2,'customers',$3,'refund','Refund for canceled order', $4, $5)
+		`, *order.PaymentAccountID, order.CustomerID, order.AdvancePaymentAmount, order.MemoNo, branchID)
 		if err != nil {
 			return fmt.Errorf("insert refund transaction: %w", err)
 		}
+	}
+	// TopSheet -> Decrease cash/bank
+	topSheet := &models.TopSheet{
+		Date:      time.Now().UTC(),
+		BranchID:  branchID,
+		Cancelled: totalItems,
+	}
+	if currentStatus == "pending" {
+		topSheet.Pending = -totalItems
+	} else if currentStatus == "checkout" {
+		topSheet.Checkout = -totalItems
+		// TODO : restock existing items to the product_stock_registry
+	}
+	// safer: lookup account type (cash/bank)
+	var acctType string
+	err = tx.QueryRow(ctx, `SELECT type FROM accounts WHERE id=$1`, *order.PaymentAccountID).Scan(&acctType)
+	if err != nil {
+		return fmt.Errorf("lookup account type: %w", err)
+	}
 
-		// TopSheet -> Decrease cash/bank
-		topSheet := &models.TopSheet{
-			Date:       time.Now(),
-			BranchID:   branchID,
-			OrderCount: -1,
-		}
-		// safer: lookup account type (cash/bank)
-		var acctType string
-		err = tx.QueryRow(ctx, `SELECT type FROM accounts WHERE id=$1`, *order.PaymentAccountID).Scan(&acctType)
-		if err != nil {
-			return fmt.Errorf("lookup account type: %w", err)
-		}
+	if currentStatus != "partial" {
 		if acctType == "bank" {
 			topSheet.Bank = -order.AdvancePaymentAmount
 		} else {
 			topSheet.Cash = -order.AdvancePaymentAmount
 		}
-		if err := SaveTopSheetTx(tx, ctx, topSheet); err != nil {
-			return fmt.Errorf("save topsheet: %w", err)
-		}
-		// Step 6: Update salesperson daily progress record
-		salespersonProgress := models.SalespersonProgress{
-			Date:       order.OrderDate,
-			BranchID:   order.BranchID,
-			EmployeeID: order.SalespersonID,
-			OrderCount: -1,
-			// SaleAmount: order.TotalPayableAmount, // DEBUG uncomment if client wants to add
-		}
-		err = UpdateSalespersonProgressReportTx(tx, ctx, &salespersonProgress)
-		if err != nil {
-			return fmt.Errorf("failed to update employee progress: %w", err)
-		}
 	}
-
+	if err := SaveTopSheetTx(tx, ctx, topSheet); err != nil {
+		return fmt.Errorf("save topsheet: %w", err)
+	}
+	// Step : Update salesperson daily progress record
+	salespersonProgress := models.SalespersonProgress{
+		Date:       time.Now().UTC(),
+		BranchID:   branchID,
+		EmployeeID: order.SalespersonID,
+		OrderCount: -totalItems,
+		// SaleAmount: order.TotalPayableAmount, // DEBUG uncomment if client wants to add
+	}
+	err = UpdateSalespersonProgressReportTx(tx, ctx, &salespersonProgress)
+	if err != nil {
+		return fmt.Errorf("failed to update employee progress: %w", err)
+	}
 	// Revert customer due
 	dueAmount := order.TotalPayableAmount - order.AdvancePaymentAmount
 	if dueAmount > 0 {
@@ -445,71 +525,171 @@ func (r *OrderRepo) CancelOrder(ctx context.Context, orderID int64, branchID int
 	return tx.Commit(ctx)
 }
 
-// ConfirmDelivery => customer pays remaining, increase cash/bank in top_sheet
-func (r *OrderRepo) ConfirmDelivery(ctx context.Context, orderID int64, branchID int64, exitDate time.Time, paidAmount float64, paymentAccountID int64) error {
+// Deprecated: ConfirmDelivery => customer pays remaining, increase cash/bank in top_sheet
+// func (r *OrderRepo) ConfirmDelivery(ctx context.Context, orderID int64, branchID, totalItems int64, exitDate time.Time, paidAmount float64, paymentAccountID int64) error {
+// 	tx, err := r.db.Begin(ctx)
+// 	if err != nil {
+// 		return fmt.Errorf("begin tx: %w", err)
+// 	}
+// 	defer tx.Rollback(ctx)
+// 	// Load order
+// 	var order models.Order
+// 	err = tx.QueryRow(ctx, `
+//         SELECT customer_id, total_payable_amount, advance_payment_amount
+//         FROM orders
+//         WHERE id=$1
+//     `, orderID).Scan(&order.CustomerID, &order.TotalPayableAmount, &order.AdvancePaymentAmount)
+// 	if err != nil {
+// 		return fmt.Errorf("load order: %w", err)
+// 	}
+
+// 	// Update customer due
+// 	_, err = tx.Exec(ctx, `
+//         UPDATE customers
+//         SET due_amount = due_amount - $1
+//         WHERE id=$2
+//     `, paidAmount, order.CustomerID)
+// 	if err != nil {
+// 		return fmt.Errorf("update customer due: %w", err)
+// 	}
+
+// 	// Update account balance
+// 	_, err = tx.Exec(ctx, `
+//         UPDATE accounts
+//         SET current_balance = current_balance + $1
+//         WHERE id=$2
+//     `, paidAmount, paymentAccountID)
+// 	if err != nil {
+// 		return fmt.Errorf("update account balance: %w", err)
+// 	}
+
+// 	// Record transaction
+// 	_, err = tx.Exec(ctx, `
+//         INSERT INTO transactions (from_entity_id, from_entity_type, to_entity_id, to_entity_type,
+//                                   amount, transaction_type, notes, branch_id)
+//         VALUES ($1,'customers',$2,'accounts',$3,'payment','Payment on delivery', $4)
+//     `, order.CustomerID, paymentAccountID, paidAmount, branchID)
+// 	if err != nil {
+// 		return fmt.Errorf("insert transaction: %w", err)
+// 	}
+
+// 	// Update order status
+// 	_, err = tx.Exec(ctx, `
+//         UPDATE orders
+//         SET status='delivery', exit_date=$1, updated_at=CURRENT_TIMESTAMP
+//         WHERE id=$2
+//     `, exitDate, orderID)
+// 	if err != nil {
+// 		return fmt.Errorf("update order status: %w", err)
+// 	}
+
+// 	// TopSheet -> Increase cash/bank
+// 	topSheet := &models.TopSheet{
+// 		Date:     time.Now(),
+// 		BranchID: branchID,
+// 		Delivery: 1,
+// 	}
+// 	// safer: lookup account type (cash/bank)
+// 	var acctType string
+// 	err = tx.QueryRow(ctx, `SELECT type FROM accounts WHERE id=$1`, paymentAccountID).Scan(&acctType)
+// 	if err != nil {
+// 		return fmt.Errorf("lookup account type: %w", err)
+// 	}
+// 	if acctType == "bank" {
+// 		topSheet.Bank = paidAmount
+// 	} else {
+// 		topSheet.Cash = paidAmount
+// 	}
+// 	if err := SaveTopSheetTx(tx, ctx, topSheet); err != nil {
+// 		return fmt.Errorf("save topsheet: %w", err)
+// 	}
+
+// 	return tx.Commit(ctx)
+// }
+
+func (r *OrderRepo) ConfirmDelivery(ctx context.Context, branchID, orderID, totalItems int64, paidAmount float64, paymentAccountID int64, exitDate time.Time) error {
 	tx, err := r.db.Begin(ctx)
 	if err != nil {
 		return fmt.Errorf("begin tx: %w", err)
 	}
 	defer tx.Rollback(ctx)
-	// Load order
-	var order models.Order
+
+	// --- Step 1: Load order ---
+	order := &models.Order{}
 	err = tx.QueryRow(ctx, `
-        SELECT customer_id, total_payable_amount, advance_payment_amount
+        SELECT id, memo_no, branch_id, order_date, salesperson_id, customer_id, total_payable_amount, advance_payment_amount, payment_account_id, status, total_items, items_delivered
         FROM orders
         WHERE id=$1
-    `, orderID).Scan(&order.CustomerID, &order.TotalPayableAmount, &order.AdvancePaymentAmount)
+    `, orderID).Scan(
+		&order.ID,
+		&order.MemoNo,
+		&order.BranchID,
+		&order.OrderDate,
+		&order.SalespersonID,
+		&order.CustomerID,
+		&order.TotalPayableAmount,
+		&order.AdvancePaymentAmount,
+		&order.PaymentAccountID,
+		&order.Status,
+		&order.TotalItems,
+		&order.ItemsDelivered,
+	)
 	if err != nil {
 		return fmt.Errorf("load order: %w", err)
 	}
 
-	// Update customer due
-	_, err = tx.Exec(ctx, `
-        UPDATE customers
-        SET due_amount = due_amount - $1
-        WHERE id=$2
-    `, paidAmount, order.CustomerID)
-	if err != nil {
-		return fmt.Errorf("update customer due: %w", err)
+	if order.Status != "checkout" && order.Status != "delivery" {
+		return fmt.Errorf("order status is not 'checkout'")
+	}
+	fmt.Println(order, totalItems)
+	if order.TotalItems-order.ItemsDelivered < totalItems {
+		totalItems = order.TotalItems - order.ItemsDelivered
 	}
 
-	// Update account balance
-	_, err = tx.Exec(ctx, `
-        UPDATE accounts
-        SET current_balance = current_balance + $1
-        WHERE id=$2
-    `, paidAmount, paymentAccountID)
-	if err != nil {
-		return fmt.Errorf("update account balance: %w", err)
-	}
-
-	// Record transaction
-	_, err = tx.Exec(ctx, `
-        INSERT INTO transactions (from_entity_id, from_entity_type, to_entity_id, to_entity_type,
-                                  amount, transaction_type, notes, branch_id)
-        VALUES ($1,'customers',$2,'accounts',$3,'payment','Payment on delivery', $4)
-    `, order.CustomerID, paymentAccountID, paidAmount, branchID)
-	if err != nil {
-		return fmt.Errorf("insert transaction: %w", err)
-	}
-
-	// Update order status
+	fmt.Println(order, totalItems)
+	fmt.Println("Total Items: ", order.TotalItems, "  Items Delivered: ", order.ItemsDelivered)
+	fmt.Println("Current: ", totalItems)
+	// --- Step 2: Update order status, exit date, delivered items ---
 	_, err = tx.Exec(ctx, `
         UPDATE orders
-        SET status='delivery', exit_date=$1, updated_at=CURRENT_TIMESTAMP
-        WHERE id=$2
-    `, exitDate, orderID)
+        SET status='delivery',
+			advance_payment_amount = COALESCE(advance_payment_amount, 0) + $1,
+			items_delivered = COALESCE(items_delivered, 0) + $2,
+			exit_date=$3
+        WHERE id=$4
+    `, paidAmount, totalItems, exitDate, orderID)
 	if err != nil {
-		return fmt.Errorf("update order status: %w", err)
+		return fmt.Errorf("update order: %w", err)
 	}
 
-	// TopSheet -> Increase cash/bank
-	topSheet := &models.TopSheet{
-		Date:     time.Now(),
-		BranchID: branchID,
-		Delivery: 1,
+	// --- Step 3: Update payment account if any payment made ---
+	if paidAmount > 0 {
+		_, err := tx.Exec(ctx, `
+            UPDATE accounts
+            SET current_balance = current_balance + $1, updated_at=CURRENT_TIMESTAMP
+            WHERE id=$2
+        `, paidAmount, paymentAccountID)
+		if err != nil {
+			return fmt.Errorf("update account balance: %w", err)
+		}
+
+		// --- Step 4: Record transaction ---
+		_, err = tx.Exec(ctx, `
+            INSERT INTO transactions (from_entity_id, from_entity_type, to_entity_id, to_entity_type, amount, transaction_type, notes, branch_id, memo_no)
+            VALUES ($1,'customers',$2,'accounts',$3,'payment','Payment for delivered order',$4,$5)
+        `, order.CustomerID, paymentAccountID, paidAmount, order.BranchID, order.MemoNo)
+		if err != nil {
+			return fmt.Errorf("insert transaction: %w", err)
+		}
 	}
-	// safer: lookup account type (cash/bank)
+
+	// --- Step 5: Update top sheet ---
+	topSheet := &models.TopSheet{
+		Date:     exitDate,
+		BranchID: branchID,
+		Checkout: -totalItems,
+		Delivery: totalItems,
+	}
 	var acctType string
 	err = tx.QueryRow(ctx, `SELECT type FROM accounts WHERE id=$1`, paymentAccountID).Scan(&acctType)
 	if err != nil {
@@ -520,10 +700,22 @@ func (r *OrderRepo) ConfirmDelivery(ctx context.Context, orderID int64, branchID
 	} else {
 		topSheet.Cash = paidAmount
 	}
-	if err := SaveTopSheetTx(tx, ctx, topSheet); err != nil {
-		return fmt.Errorf("save topsheet: %w", err)
+	err = SaveTopSheetTx(tx, ctx, topSheet)
+	if err != nil {
+		return fmt.Errorf("save top-sheet: %w", err)
 	}
 
+	// --- Step 6: Update customer due ---
+	if paidAmount != 0 {
+		_, err := tx.Exec(ctx, `
+            UPDATE customers
+            SET due_amount = due_amount - $1
+            WHERE id=$2
+        `, paidAmount, order.CustomerID)
+		if err != nil {
+			return fmt.Errorf("update customer due: %w", err)
+		}
+	}
 	return tx.Commit(ctx)
 }
 
@@ -599,7 +791,37 @@ func (r *OrderRepo) GetOrderDetailsByID(ctx context.Context, orderID int64) (*mo
 	return &order, nil
 }
 
-// ListOrdersWithItems fetches a list of orders filtered by customer_id or salesperson_id
+// GetOrderItemsByMemoNo fetches order items by memo_no
+func (r *OrderRepo) GetOrderItemsByMemoNo(ctx context.Context, memoNo string) ([]*models.OrderItem, error) {
+	// Fetch order items with product names by memo no.
+	rows, err := r.db.Query(ctx, `
+        SELECT 
+            oi.id, oi.product_id, p.product_name AS product_name, oi.quantity, oi.subtotal
+        FROM order_items oi
+        LEFT JOIN products p ON oi.product_id = p.id
+        WHERE oi.memo_no = $1
+    `, memoNo)
+	if err != nil {
+		return nil, fmt.Errorf("fetch order items: %w", err)
+	}
+	defer rows.Close()
+
+	items := []*models.OrderItem{}
+	for rows.Next() {
+		var it models.OrderItem
+		var productName string
+		if err := rows.Scan(&it.ID, &it.ProductID, &productName, &it.Quantity, &it.TotalPrice); err != nil {
+			return nil, fmt.Errorf("scan order item: %w", err)
+		}
+		it.MemoNo = memoNo
+		it.ProductName = productName
+		items = append(items, &it)
+	}
+
+	return items, nil
+}
+
+// Deprecated: ListOrdersWithItems fetches a list of orders filtered by customer_id or salesperson_id
 func (r *OrderRepo) ListOrdersWithItems(ctx context.Context, customerID, SalespersonID *int64, branchID int64) ([]*models.Order, error) {
 	query := `
 		SELECT 
@@ -675,6 +897,55 @@ func (r *OrderRepo) ListOrdersWithItems(ctx context.Context, customerID, Salespe
 		itemRows.Close()
 		o.Items = items
 
+		orders = append(orders, &o)
+	}
+
+	return orders, nil
+}
+
+// ListOrders fetches a list of orders
+func (r *OrderRepo) ListOrders(ctx context.Context, branchID int64) ([]*models.Order, error) {
+	query := `
+		SELECT 
+		    o.id, o.memo_no, o.branch_id, o.order_date, o.salesperson_id, o.customer_id,
+		    o.total_payable_amount, o.advance_payment_amount, o.payment_account_id,
+		    o.status, o.delivery_date, o.exit_date, o.items_delivered, o.total_items, o.notes, o.created_at, o.updated_at,
+			c.name, c.mobile, e.name, e.mobile
+		FROM orders o
+		LEFT JOIN customers c ON o.customer_id = c.id
+		LEFT JOIN employees e ON o.salesperson_id = e.id
+		WHERE 1=1
+	`
+
+	args := []interface{}{}
+	argID := 1
+
+	if branchID != 0 {
+		query += ` AND o.branch_id=$` + strconv.Itoa(argID)
+		args = append(args, branchID)
+		argID++
+	}
+
+	query += ` ORDER BY o.order_date DESC`
+
+	rows, err := r.db.Query(ctx, query, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	orders := []*models.Order{}
+	for rows.Next() {
+		var o models.Order
+		err := rows.Scan(
+			&o.ID, &o.MemoNo, &o.BranchID, &o.OrderDate, &o.SalespersonID, &o.CustomerID,
+			&o.TotalPayableAmount, &o.AdvancePaymentAmount, &o.PaymentAccountID,
+			&o.Status, &o.DeliveryDate, &o.ExitDate, &o.ItemsDelivered, &o.TotalItems, &o.Notes, &o.CreatedAt, &o.UpdatedAt,
+			&o.CustomerName, &o.CustomerMobile, &o.SalespersonName, &o.SalespersonMobile,
+		)
+		if err != nil {
+			return nil, err
+		}
 		orders = append(orders, &o)
 	}
 

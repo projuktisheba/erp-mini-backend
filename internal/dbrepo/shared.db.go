@@ -28,21 +28,50 @@ func SaveTopSheet(db *pgxpool.Pool, ctx context.Context, ts *models.TopSheet) er
 }
 func SaveTopSheetTx(tx pgx.Tx, ctx context.Context, ts *models.TopSheet) error {
 	query := `
-        INSERT INTO top_sheet (
-            sheet_date, branch_id, expense, cash, bank, order_count, delivery, checkout, ready_made
-        ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8, $9)
-        ON CONFLICT (sheet_date, branch_id) DO UPDATE SET
-            expense      = top_sheet.expense + EXCLUDED.expense,
-            cash         = top_sheet.cash + EXCLUDED.cash,
-            bank         = top_sheet.bank + EXCLUDED.bank,
-            order_count  = top_sheet.order_count + EXCLUDED.order_count,
-            delivery     = top_sheet.delivery + EXCLUDED.delivery,
-            checkout     = top_sheet.checkout + EXCLUDED.checkout,
-            ready_made     = top_sheet.ready_made + EXCLUDED.ready_made;
-    `
-	_, err := tx.Exec(ctx, query, ts.Date, ts.BranchID, ts.Expense, ts.Cash, ts.Bank, ts.OrderCount, ts.Delivery, ts.Checkout, ts.ReadyMade)
+		INSERT INTO top_sheet (
+			sheet_date,
+			branch_id,
+			expense,
+			cash,
+			bank,
+			order_count,
+			pending,
+			delivery,
+			checkout,
+			cancelled,
+			ready_made
+		)
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)
+		ON CONFLICT (sheet_date, branch_id) DO UPDATE SET
+			expense      = top_sheet.expense + EXCLUDED.expense,
+			cash         = top_sheet.cash + EXCLUDED.cash,
+			bank         = top_sheet.bank + EXCLUDED.bank,
+			order_count  = top_sheet.order_count + EXCLUDED.order_count,
+			pending      = top_sheet.pending + EXCLUDED.pending,
+			delivery     = top_sheet.delivery + EXCLUDED.delivery,
+			checkout     = top_sheet.checkout + EXCLUDED.checkout,
+			cancelled    = top_sheet.cancelled + EXCLUDED.cancelled,
+			ready_made   = top_sheet.ready_made + EXCLUDED.ready_made;
+	`
+
+	_, err := tx.Exec(
+		ctx,
+		query,
+		ts.Date,
+		ts.BranchID,
+		ts.Expense,
+		ts.Cash,
+		ts.Bank,
+		ts.OrderCount,
+		ts.Pending,
+		ts.Delivery,
+		ts.Checkout,
+		ts.Cancelled,
+		ts.ReadyMade,
+	)
 	return err
 }
+
 
 // UpdateSalespersonProgressReportTx updates or inserts salesperson progress
 func UpdateSalespersonProgressReportTx(tx pgx.Tx, ctx context.Context, ts *models.SalespersonProgress) error {

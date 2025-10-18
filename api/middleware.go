@@ -35,7 +35,6 @@ func (app *application) AuthUser(next http.Handler) http.Handler {
 		}
 
 		authHeader := r.Header.Get("Authorization")
-		app.infoLog.Printf("AuthUser: %s %s Authorization=%q", r.Method, r.URL.Path, authHeader)
 
 		if authHeader == "" {
 			app.errorLog.Println("AuthUser: no Authorization header")
@@ -118,8 +117,6 @@ func (app *application) AuthUser(next http.Handler) http.Handler {
 			tokenUser.IssuedAt = int64(iatf)
 		}
 
-		app.infoLog.Printf("AuthUser: success id=%d username=%s role=%s", tokenUser.ID, tokenUser.Username, tokenUser.Role)
-
 		// attach user to context using consistent key
 		ctx := context.WithValue(r.Context(), userContextKey, tokenUser)
 		next.ServeHTTP(w, r.WithContext(ctx))
@@ -153,7 +150,6 @@ func (app *application) RequireRole(required Role) func(next http.Handler) http.
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			user, ok := app.UserFromContext(r.Context())
-			app.infoLog.Printf("RequireRole: required=%s userFound=%v", required, ok)
 			if !ok {
 				utils.WriteJSON(w, http.StatusUnauthorized, models.Response{
 					Error:   true,
@@ -163,7 +159,6 @@ func (app *application) RequireRole(required Role) func(next http.Handler) http.
 			}
 
 			userRole := Role(user.Role)
-			app.infoLog.Printf("RequireRole: userRole=%s required=%s", userRole, required)
 			if !HasAccess(userRole, required) {
 				utils.WriteJSON(w, http.StatusForbidden, models.Response{
 					Error:   true,

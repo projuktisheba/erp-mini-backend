@@ -174,7 +174,7 @@ type Product struct {
 type Sale struct {
 	SaleDate           time.Time  `json:"sale_date"`
 	MemoNo             string     `json:"memo_no"`
-	BranchID             string     `json:"branch_id"`
+	BranchID           string     `json:"branch_id"`
 	SalespersonID      int64      `json:"salesperson_id"`
 	SalespersonName    string     `json:"salesperson_name"`
 	CustomerID         int64      `json:"customer_id"`
@@ -183,7 +183,7 @@ type Sale struct {
 	PaidAmount         float64    `json:"paid_amount"`
 	DueAmount          float64    `json:"due_amount"`
 	PaymentAccountID   int64      `json:"payment_account_id"`
-	PaymentAccountName   string      `json:"payment_account_name"`
+	PaymentAccountName string     `json:"payment_account_name"`
 	Notes              string     `json:"notes"`
 	Items              []*Product `json:"items"`
 }
@@ -217,6 +217,8 @@ type Order struct {
 	PaymentAccountID     *int64       `json:"payment_account_id,omitempty"`
 	Status               string       `json:"status"` // pending, checkout, delivery, cancelled
 	DeliveryDate         *time.Time   `json:"delivery_date,omitempty"`
+	TotalItems           int64        `json:"total_items"`
+	ItemsDelivered       int64        `json:"items_delivered"`
 	ExitDate             *time.Time   `json:"exit_date,omitempty"`
 	Notes                *string      `json:"notes,omitempty"`
 	CreatedAt            time.Time    `json:"created_at"`
@@ -314,8 +316,10 @@ type TopSheet struct {
 	Bank        float64   `json:"bank"`
 	Balance     float64   `json:"balance"`
 	OrderCount  int64     `json:"order_count"`
+	Pending     int64     `json:"pending"`
 	Delivery    int64     `json:"delivery"`
 	Checkout    int64     `json:"checkout"`
+	Cancelled   int64     `json:"cancelled"`
 	ReadyMade   int64     `json:"ready_made"`
 }
 
@@ -342,11 +346,11 @@ type WorkerProgress struct {
 }
 
 type SalaryRecord struct {
-    EmployeeID   int64     `json:"employee_id"`
-    EmployeeName string    `json:"employee_name"`
-    Role         string    `json:"role"`
-    BaseSalary   float64   `json:"base_salary"`
-    OvertimeRate float64   `json:"overtime_rate"`
-    TotalSalary  float64   `json:"total_salary"`
-    SheetDate    time.Time `json:"sheet_date"`
+	EmployeeID   int64     `json:"employee_id"`
+	EmployeeName string    `json:"employee_name"`
+	Role         string    `json:"role"`
+	BaseSalary   float64   `json:"base_salary"`
+	OvertimeRate float64   `json:"overtime_rate"`
+	TotalSalary  float64   `json:"total_salary"`
+	SheetDate    time.Time `json:"sheet_date"`
 }

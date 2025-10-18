@@ -1,3 +1,24 @@
+-- list of table:
+
+-- 1. `branches`
+-- 2. `employees`
+-- 3. `attendance` : Deprecated
+-- 4. `customers`
+-- 5. `accounts`
+-- 6. `products`
+-- 7. `orders`
+-- 8. `order_items`
+-- 9. `transactions`
+-- 10. `suppliers`
+-- 11. `purchase`
+-- 12. `top_sheet`
+-- 13. `product_stock_registry`
+-- 14. `sales_history`
+-- 15. `sold_items_history`
+-- 16. `employees_progress`
+
+
+
 -- =========================
 -- Table: branches
 -- =========================
@@ -180,13 +201,13 @@ VALUES
 CREATE TABLE orders (
     id BIGSERIAL PRIMARY KEY,
     branch_id BIGINT NOT NULL REFERENCES branches(id) ON DELETE CASCADE,
-    memo_no VARCHAR(100) NOT NULL UNIQUE,
+    memo_no VARCHAR(100) NOT NULL,
     order_date DATE NOT NULL DEFAULT CURRENT_DATE,
     
     salesperson_id BIGINT NOT NULL REFERENCES employees(id) ON DELETE RESTRICT,
     customer_id BIGINT NOT NULL REFERENCES customers(id) ON DELETE RESTRICT,
     
-    total_payable_amount NUMERIC(12,2) NOT NULL,
+    total_payable_amount NUMERIC(12,2) NOT NULL DEFAULT 0,
     advance_payment_amount NUMERIC(12,2) DEFAULT 0,
 
     payment_account_id BIGINT REFERENCES accounts(id) ON DELETE SET NULL,
@@ -194,12 +215,15 @@ CREATE TABLE orders (
     status VARCHAR(20) NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'checkout', 'delivery', 'cancelled')),
     
     delivery_date DATE,
+    total_items BIGINT NOT NULL DEFAULT 0,
+    items_delivered BIGINT NOT NULL DEFAULT 0,
     exit_date DATE,
     
     notes TEXT DEFAULT '',
     
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE(memo_no, branch_id)
 );
 -- =========================
 -- Optimized Indexes for orders table
@@ -333,8 +357,10 @@ CREATE TABLE top_sheet (
     cash NUMERIC(12,2) NOT NULL DEFAULT 0.00,
     bank NUMERIC(12,2) NOT NULL DEFAULT 0.00,
     order_count BIGINT NOT NULL DEFAULT 0,
+    pending BIGINT NOT NULL DEFAULT 0,
     delivery BIGINT NOT NULL DEFAULT 0,
     checkout BIGINT NOT NULL DEFAULT 0,
+    cancelled BIGINT NOT NULL DEFAULT 0,
     ready_made BIGINT NOT NULL DEFAULT 0,
     UNIQUE(sheet_date, branch_id)
 );
@@ -410,3 +436,7 @@ CREATE TABLE employees_progress (
     UNIQUE(sheet_date, employee_id)
 );
 CREATE INDEX idx_employees_progress_branch_id ON employees_progress(branch_id);
+
+
+CREATE SEQUENCE order_memo_seq START 9000;
+CREATE SEQUENCE sales_memo_seq START 9000;

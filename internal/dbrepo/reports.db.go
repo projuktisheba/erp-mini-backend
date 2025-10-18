@@ -18,7 +18,6 @@ func NewReportRepo(db *pgxpool.Pool) *ReportRepo {
 }
 
 func (r *ReportRepo) GetOrderOverView(ctx context.Context, branchID int64, summaryType string, refDate time.Time) (*models.OrderOverview, error) {
-	// Calculate start and end dates based on summary type
 	var startDate, endDate time.Time
 
 	switch summaryType {
@@ -26,38 +25,32 @@ func (r *ReportRepo) GetOrderOverView(ctx context.Context, branchID int64, summa
 		startDate = refDate
 		endDate = refDate
 	case "weekly":
-		weekday := int(refDate.Weekday())           // Sunday=0, Monday=1, etc.
-		startDate = refDate.AddDate(0, 0, -weekday) // start of week
-		endDate = startDate.AddDate(0, 0, 6)        // end of week
+		weekday := int(refDate.Weekday())
+		startDate = refDate.AddDate(0, 0, -weekday)
+		endDate = startDate.AddDate(0, 0, 6)
 	case "monthly":
 		startDate = time.Date(refDate.Year(), refDate.Month(), 1, 0, 0, 0, 0, refDate.Location())
-		endDate = startDate.AddDate(0, 1, -1) // last day of month
+		endDate = startDate.AddDate(0, 1, -1)
 	case "yearly":
 		startDate = time.Date(refDate.Year(), 1, 1, 0, 0, 0, 0, refDate.Location())
 		endDate = time.Date(refDate.Year(), 12, 31, 0, 0, 0, 0, refDate.Location())
 	case "all":
-		startDate = time.Time{} // zero time
+		startDate = time.Time{}
 		endDate = time.Now()
 	default:
 		return nil, fmt.Errorf("invalid summary type: %s", summaryType)
 	}
 
-	// SQL query with BETWEEN startDate AND endDate
 	query := `
-	SELECT
-		COUNT(*) FILTER (WHERE status='pending'   AND branch_id=$3 AND order_date BETWEEN $1 AND $2),
-		COUNT(*) FILTER (WHERE status='checkout'  AND branch_id=$3 AND order_date BETWEEN $1 AND $2),
-		COUNT(*) FILTER (WHERE status='delivery'  AND branch_id=$3 AND order_date BETWEEN $1 AND $2),
-		COUNT(*) FILTER (WHERE status='cancelled' AND branch_id=$3 AND order_date BETWEEN $1 AND $2),
-		COUNT(*) FILTER (WHERE branch_id=$3 AND order_date BETWEEN $1 AND $2),
-
-		COALESCE(SUM(total_payable_amount) FILTER (WHERE status='pending'   AND branch_id=$3 AND order_date BETWEEN $1 AND $2),0),
-		COALESCE(SUM(total_payable_amount) FILTER (WHERE status='checkout'  AND branch_id=$3 AND order_date BETWEEN $1 AND $2),0),
-		COALESCE(SUM(total_payable_amount) FILTER (WHERE status='delivery'  AND branch_id=$3 AND order_date BETWEEN $1 AND $2),0),
-		COALESCE(SUM(total_payable_amount) FILTER (WHERE status='cancelled' AND branch_id=$3 AND order_date BETWEEN $1 AND $2),0),
-		COALESCE(SUM(total_payable_amount) FILTER (WHERE branch_id=$3 AND order_date BETWEEN $1 AND $2),0)
-	FROM orders
-
+		SELECT
+			COALESCE(SUM(pending), 0),
+			COALESCE(SUM(checkout), 0),
+			COALESCE(SUM(delivery), 0),
+			COALESCE(SUM(cancelled), 0),
+			COALESCE(SUM(order_count), 0)
+		FROM top_sheet
+		WHERE branch_id = $3
+		  AND sheet_date BETWEEN $1 AND $2
 	`
 
 	var s models.OrderOverview
@@ -67,12 +60,6 @@ func (r *ReportRepo) GetOrderOverView(ctx context.Context, branchID int64, summa
 		&s.CompletedOrders,
 		&s.CancelledOrders,
 		&s.TotalOrders,
-
-		&s.PendingOrdersAmount,
-		&s.CheckoutOrdersAmount,
-		&s.CompletedOrdersAmount,
-		&s.CancelledOrdersAmount,
-		&s.TotalOrdersAmount,
 	)
 	if err != nil {
 		return nil, err
@@ -80,6 +67,7 @@ func (r *ReportRepo) GetOrderOverView(ctx context.Context, branchID int64, summa
 
 	return &s, nil
 }
+
 
 // GetSalesPersonProgressReport gives sales progress summary for all salespersons in a branch
 // grouped by day, week, month, or year — based on data from employees_progress table.

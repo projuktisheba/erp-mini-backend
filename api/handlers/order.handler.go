@@ -156,6 +156,7 @@ func (o *OrderHandler) OrderDelivery(w http.ResponseWriter, r *http.Request) {
 		OrderID          int64   `json:"order_id"`
 		ExitDate         string  `json:"exit_date"`
 		PaidAmount       float64 `json:"paid_amount"`
+		TotalItems       int64   `json:"total_items_delivered"`
 		PaymentAccountID int64   `json:"payment_account_id"`
 	}
 	err := utils.ReadJSON(w, r, &req)
@@ -170,8 +171,10 @@ func (o *OrderHandler) OrderDelivery(w http.ResponseWriter, r *http.Request) {
 		utils.BadRequest(w, err)
 		return
 	}
+	fmt.Printf("Request data: %+v\n", req)
+	fmt.Printf("Exit date: %+v\n", exitDate)
 
-	err = o.DB.ConfirmDelivery(r.Context(), req.OrderID, branchID, exitDate, req.PaidAmount, req.PaymentAccountID)
+	err = o.DB.ConfirmDelivery(r.Context(), branchID, req.OrderID, req.TotalItems, req.PaidAmount, req.PaymentAccountID, exitDate)
 	if err != nil {
 		o.errorLog.Println("ERROR_03_OrderDelivery: ", err)
 		utils.BadRequest(w, err)
@@ -258,29 +261,37 @@ func (o *OrderHandler) GetOrderDetailsByID(w http.ResponseWriter, r *http.Reques
 	utils.WriteJSON(w, http.StatusOK, resp)
 }
 
+// GetOrderItemsByMemoNo
+func (o *OrderHandler) GetOrderItemsByMemoNo(w http.ResponseWriter, r *http.Request) {
+	memoNo := strings.TrimSpace(r.URL.Query().Get("memo_no"))
+	if memoNo == "" {
+		o.errorLog.Println("ERROR_01_GetOrderItemsByMemoNo: Missing memo no")
+		utils.BadRequest(w, errors.New("Missing memo_no"))
+		return
+	}
+
+	items, err := o.DB.GetOrderItemsByMemoNo(r.Context(), memoNo)
+	if err != nil {
+		o.errorLog.Println("ERROR_02_GetOrderItemsByMemoNo: ", err)
+		utils.BadRequest(w, err)
+		return
+	}
+
+	var resp struct {
+		Error   bool                `json:"error"`
+		Message string              `json:"message"`
+		Items   []*models.OrderItem `json:"items"`
+	}
+	resp.Error = false
+	resp.Message = "Order items fetched successfully"
+	resp.Items = items
+
+	utils.WriteJSON(w, http.StatusOK, resp)
+}
+
 // ListOrdersWithFilter - list all or filter by customerID / salesManID
-func (o *OrderHandler) ListOrdersWithFilter(w http.ResponseWriter, r *http.Request) {
-	customerIDStr := r.URL.Query().Get("customer_id")
-	salesManIDStr := r.URL.Query().Get("sales_man_id")
-	var customerID, salesManID *int64
-	if customerIDStr != "" {
-		id, err := strconv.ParseInt(customerIDStr, 10, 64)
-		if err != nil {
-			o.errorLog.Println("ERROR_01_ListOrdersWithFilter: invalid customerID", err)
-			utils.BadRequest(w, err)
-			return
-		}
-		customerID = &id
-	}
-	if salesManIDStr != "" {
-		id, err := strconv.ParseInt(salesManIDStr, 10, 64)
-		if err != nil {
-			o.errorLog.Println("ERROR_02_ListOrdersWithFilter: invalid salespersonID", err)
-			utils.BadRequest(w, err)
-			return
-		}
-		salesManID = &id
-	}
+func (o *OrderHandler) ListOrders(w http.ResponseWriter, r *http.Request) {
+
 	//read branch id
 	branchID := utils.GetBranchID(r)
 	if branchID == 0 {
@@ -288,7 +299,7 @@ func (o *OrderHandler) ListOrdersWithFilter(w http.ResponseWriter, r *http.Reque
 		utils.BadRequest(w, errors.New("Branch ID not found. Please include 'X-Branch-ID' header, e.g., X-Branch-ID: 1"))
 		return
 	}
-	orders, err := o.DB.ListOrdersWithItems(r.Context(), customerID, salesManID, branchID)
+	orders, err := o.DB.ListOrders(r.Context(), branchID)
 	if err != nil {
 		o.errorLog.Println("ERROR_03_ListOrdersWithFilter: ", err)
 		utils.BadRequest(w, err)

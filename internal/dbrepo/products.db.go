@@ -176,13 +176,14 @@ func (s *ProductRepo) SaleProducts(ctx context.Context, branchID int64, sale *mo
 	}
 
 	// Step 2: Insert into sales_history
-	_, err = tx.Exec(ctx, `
+	err = tx.QueryRow(ctx, `
 		INSERT INTO sales_history (
 			memo_no, sale_date, branch_id, customer_id, salesperson_id, 
 			payment_account_id, total_payable_amount, paid_amount, created_at, updated_at
-		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
-	`, sale.MemoNo, sale.SaleDate, branchID, sale.CustomerID, sale.SalespersonID,
-		sale.PaymentAccountID, sale.TotalPayableAmount, sale.PaidAmount)
+		) VALUES (LPAD(NEXTVAL('sales_memo_seq')::TEXT, 5, '0'), $1, $2, $3, $4, $5, $6, $7, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+		 RETURNING memo_no
+	`, sale.SaleDate, branchID, sale.CustomerID, sale.SalespersonID,
+		sale.PaymentAccountID, sale.TotalPayableAmount, sale.PaidAmount).Scan(&sale.MemoNo)
 	if err != nil {
 		return "", fmt.Errorf("insert sales_history: %w", err)
 	}
