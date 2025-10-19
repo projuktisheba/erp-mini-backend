@@ -79,21 +79,21 @@ CREATE INDEX idx_employees_mobile ON employees(mobile);
 CREATE INDEX idx_employees_role ON employees(role);
 CREATE INDEX idx_employees_branch_id ON employees(branch_id);
 
--- Chairman
+-- chairman 55914104
 INSERT INTO employees (name, role, status, mobile, email, password, passport_no, joining_date, address, base_salary, overtime_rate, avatar_link, branch_id)
-VALUES ('Chairman', 'chairman', 'active', '000', 'chairman', '$2a$12$uV6uv.vXpU0KCeYlgBS8r.KWYoRBP2Kk4uAB2K9k4MAHD2ucZNzde', '', CURRENT_TIMESTAMP, '', 0, 0, '', 1);
+VALUES ('Chairman', 'chairman', 'active', '000', 'chairman', '$2a$12$Qgk5le8dFqxUD/t28f.TLOUgTAfUe1UwcgRWus3mYvUz7q268P7i.', '', CURRENT_TIMESTAMP, '', 0, 0, '', 1);
 
--- Manager
+-- alfanar 50036274
 INSERT INTO employees (name, role, status, mobile, email, password, passport_no, joining_date, address, base_salary, overtime_rate, avatar_link, branch_id)
-VALUES ('AL FANAR ABAYAT', 'manager', 'active', '001', 'alfanar', '$2a$12$uV6uv.vXpU0KCeYlgBS8r.KWYoRBP2Kk4uAB2K9k4MAHD2ucZNzde', '', CURRENT_TIMESTAMP, '', 0, 0, '', 1);
+VALUES ('AL FANAR ABAYAT', 'manager', 'active', '001', 'alfanar', '$2a$12$kaqt4fkjXdbjBgW3RVcxiOu5cC24Yr5KX867ZG9W/LFVGAH1W6kvO', '', CURRENT_TIMESTAMP, '', 0, 0, '', 1);
 
--- Manager
+-- diva 51051407
 INSERT INTO employees (name, role, status, mobile, email, password, passport_no, joining_date, address, base_salary, overtime_rate, avatar_link, branch_id)
-VALUES ('DIVA ABAYAT', 'manager', 'active', '002', 'diva', '$2a$12$uV6uv.vXpU0KCeYlgBS8r.KWYoRBP2Kk4uAB2K9k4MAHD2ucZNzde', '', CURRENT_TIMESTAMP, '', 0, 0, '', 2);
+VALUES ('DIVA ABAYAT', 'manager', 'active', '002', 'diva', '$2a$12$TG2jdTFOjRX4YKfEzYFQ9On0O8BegIWhUkeqtCWCXsUIgs9CDYUwW', '', CURRENT_TIMESTAMP, '', 0, 0, '', 2);
 
--- Manager
+-- eidal 50298321
 INSERT INTO employees (name, role, status, mobile, email, password, passport_no, joining_date, address, base_salary, overtime_rate, avatar_link, branch_id)
-VALUES ('EID AL ABAYAT', 'manager', 'active', '003', 'eidal', '$2a$12$uV6uv.vXpU0KCeYlgBS8r.KWYoRBP2Kk4uAB2K9k4MAHD2ucZNzde', '', CURRENT_TIMESTAMP, '', 0, 0, '', 3);
+VALUES ('EID AL ABAYAT', 'manager', 'active', '003', 'eidal', '$2a$12$fY1Ixpvx/RVZxcrTqh7Ufe17jryjKyXvk4eNrAumXTvew8KuISf22', '', CURRENT_TIMESTAMP, '', 0, 0, '', 3);
 
 
 -- =========================
