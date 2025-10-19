@@ -36,10 +36,10 @@ func (r *OrderRepo) CreateOrder(ctx context.Context, newOrder *models.Order) err
 	// --- Step 1: Insert order ---
 	err = tx.QueryRow(ctx, `
         INSERT INTO orders (memo_no, branch_id, order_date, salesperson_id, customer_id, total_payable_amount, advance_payment_amount, payment_account_id, status, delivery_date, exit_date, notes, total_items)
-        VALUES (LPAD(NEXTVAL('order_memo_seq')::TEXT, 5, '0') ,$1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)
+        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12, $13)
         RETURNING id, memo_no
     `,
-		newOrder.BranchID, newOrder.OrderDate, newOrder.SalespersonID, newOrder.CustomerID,
+		newOrder.MemoNo, newOrder.BranchID, newOrder.OrderDate, newOrder.SalespersonID, newOrder.CustomerID,
 		newOrder.TotalPayableAmount, newOrder.AdvancePaymentAmount, newOrder.PaymentAccountID,
 		newOrder.Status, newOrder.DeliveryDate, newOrder.ExitDate, newOrder.Notes, totalItems,
 	).Scan(&newOrder.ID, &newOrder.MemoNo)
@@ -70,10 +70,20 @@ func (r *OrderRepo) CreateOrder(ctx context.Context, newOrder *models.Order) err
 		}
 
 		// --- Step 4: Record transaction ---
-		_, err = tx.Exec(ctx, `
-            INSERT INTO transactions (from_entity_id, from_entity_type, to_entity_id, to_entity_type, amount, transaction_type, notes, branch_id, memo_no)
-            VALUES ($1,'customers',$2,'accounts',$3,'payment','Advance payment for order', $4, $5)
-        `, newOrder.CustomerID, *newOrder.PaymentAccountID, newOrder.AdvancePaymentAmount, newOrder.BranchID, newOrder.MemoNo)
+		//insert transaction
+		transaction := &models.Transaction{
+			BranchID:        newOrder.BranchID,
+			MemoNo:          newOrder.MemoNo,
+			FromID:          newOrder.CustomerID,
+			FromType:        "customers",
+			ToID:            *newOrder.PaymentAccountID,
+			ToType:          "accounts",
+			Amount:          newOrder.AdvancePaymentAmount,
+			TransactionType: "payment",
+			CreatedAt:       newOrder.OrderDate,
+			Notes:           "Advance payment for order",
+		}
+		_, err = CreateTransactionTx(ctx, tx, transaction) // silently add transaction
 		if err != nil {
 			return fmt.Errorf("insert transaction: %w", err)
 		}
@@ -384,11 +394,11 @@ func (r *OrderRepo) CheckoutOrder(ctx context.Context, orderID int64, branchID i
 	totalItems := int64(0)
 	err = tx.QueryRow(ctx, `SELECT SUM(COALESCE(quantity, 0)) FROM order_items WHERE memo_no=$1`, memoNo).Scan(&totalItems)
 	if err != nil {
-		return fmt.Errorf("Unable to count total items: %w", err)
+		return fmt.Errorf("unable to count total items: %w", err)
 	}
 	// Update top_sheet -> increase checkout
 	topSheet := &models.TopSheet{
-		Date:     time.Now().UTC(),
+		Date:     time.Now(),
 		BranchID: branchID,
 		Pending:  -totalItems,
 		Checkout: totalItems,
@@ -427,9 +437,10 @@ func (r *OrderRepo) CancelOrder(ctx context.Context, orderID int64, branchID int
 		SET status = 'cancelled',
 			updated_at = CURRENT_TIMESTAMP
 		WHERE id = $1
-		RETURNING id, memo_no, customer_id, salesperson_id, advance_payment_amount, total_payable_amount, payment_account_id, items_delivered
+		RETURNING id, branch_id, memo_no, customer_id, salesperson_id, advance_payment_amount, total_payable_amount, payment_account_id, items_delivered
 	`, orderID).Scan(
 		&order.ID,
+		&order.BranchID,
 		&order.MemoNo,
 		&order.CustomerID,
 		&order.SalespersonID,
@@ -458,19 +469,28 @@ func (r *OrderRepo) CancelOrder(ctx context.Context, orderID int64, branchID int
 		if err != nil {
 			return fmt.Errorf("revert account balance: %w", err)
 		}
+		//insert transaction
+		transaction := &models.Transaction{
+			BranchID:        order.BranchID,
+			MemoNo:          order.MemoNo,
+			FromID:          *order.PaymentAccountID,
+			FromType:        "accounts",
+			ToID:            order.CustomerID,
+			ToType:          "customers",
+			Amount:          order.AdvancePaymentAmount,
+			TransactionType: "refund",
+			CreatedAt:       time.Now().UTC(),
+			Notes:           "Refund for cancelled order",
+		}
+		_, err = CreateTransactionTx(ctx, tx, transaction) // silently add transaction
 
-		_, err = tx.Exec(ctx, `
-			INSERT INTO transactions (from_entity_id, from_entity_type, to_entity_id, to_entity_type,
-									  amount, transaction_type, notes, memo_no, branch_id)
-			VALUES ($1,'accounts',$2,'customers',$3,'refund','Refund for canceled order', $4, $5)
-		`, *order.PaymentAccountID, order.CustomerID, order.AdvancePaymentAmount, order.MemoNo, branchID)
 		if err != nil {
 			return fmt.Errorf("insert refund transaction: %w", err)
 		}
 	}
 	// TopSheet -> Decrease cash/bank
 	topSheet := &models.TopSheet{
-		Date:      time.Now().UTC(),
+		Date:      time.Now(),
 		BranchID:  branchID,
 		Cancelled: totalItems,
 	}
@@ -524,88 +544,6 @@ func (r *OrderRepo) CancelOrder(ctx context.Context, orderID int64, branchID int
 
 	return tx.Commit(ctx)
 }
-
-// Deprecated: ConfirmDelivery => customer pays remaining, increase cash/bank in top_sheet
-// func (r *OrderRepo) ConfirmDelivery(ctx context.Context, orderID int64, branchID, totalItems int64, exitDate time.Time, paidAmount float64, paymentAccountID int64) error {
-// 	tx, err := r.db.Begin(ctx)
-// 	if err != nil {
-// 		return fmt.Errorf("begin tx: %w", err)
-// 	}
-// 	defer tx.Rollback(ctx)
-// 	// Load order
-// 	var order models.Order
-// 	err = tx.QueryRow(ctx, `
-//         SELECT customer_id, total_payable_amount, advance_payment_amount
-//         FROM orders
-//         WHERE id=$1
-//     `, orderID).Scan(&order.CustomerID, &order.TotalPayableAmount, &order.AdvancePaymentAmount)
-// 	if err != nil {
-// 		return fmt.Errorf("load order: %w", err)
-// 	}
-
-// 	// Update customer due
-// 	_, err = tx.Exec(ctx, `
-//         UPDATE customers
-//         SET due_amount = due_amount - $1
-//         WHERE id=$2
-//     `, paidAmount, order.CustomerID)
-// 	if err != nil {
-// 		return fmt.Errorf("update customer due: %w", err)
-// 	}
-
-// 	// Update account balance
-// 	_, err = tx.Exec(ctx, `
-//         UPDATE accounts
-//         SET current_balance = current_balance + $1
-//         WHERE id=$2
-//     `, paidAmount, paymentAccountID)
-// 	if err != nil {
-// 		return fmt.Errorf("update account balance: %w", err)
-// 	}
-
-// 	// Record transaction
-// 	_, err = tx.Exec(ctx, `
-//         INSERT INTO transactions (from_entity_id, from_entity_type, to_entity_id, to_entity_type,
-//                                   amount, transaction_type, notes, branch_id)
-//         VALUES ($1,'customers',$2,'accounts',$3,'payment','Payment on delivery', $4)
-//     `, order.CustomerID, paymentAccountID, paidAmount, branchID)
-// 	if err != nil {
-// 		return fmt.Errorf("insert transaction: %w", err)
-// 	}
-
-// 	// Update order status
-// 	_, err = tx.Exec(ctx, `
-//         UPDATE orders
-//         SET status='delivery', exit_date=$1, updated_at=CURRENT_TIMESTAMP
-//         WHERE id=$2
-//     `, exitDate, orderID)
-// 	if err != nil {
-// 		return fmt.Errorf("update order status: %w", err)
-// 	}
-
-// 	// TopSheet -> Increase cash/bank
-// 	topSheet := &models.TopSheet{
-// 		Date:     time.Now(),
-// 		BranchID: branchID,
-// 		Delivery: 1,
-// 	}
-// 	// safer: lookup account type (cash/bank)
-// 	var acctType string
-// 	err = tx.QueryRow(ctx, `SELECT type FROM accounts WHERE id=$1`, paymentAccountID).Scan(&acctType)
-// 	if err != nil {
-// 		return fmt.Errorf("lookup account type: %w", err)
-// 	}
-// 	if acctType == "bank" {
-// 		topSheet.Bank = paidAmount
-// 	} else {
-// 		topSheet.Cash = paidAmount
-// 	}
-// 	if err := SaveTopSheetTx(tx, ctx, topSheet); err != nil {
-// 		return fmt.Errorf("save topsheet: %w", err)
-// 	}
-
-// 	return tx.Commit(ctx)
-// }
 
 func (r *OrderRepo) ConfirmDelivery(ctx context.Context, branchID, orderID, totalItems int64, paidAmount float64, paymentAccountID int64, exitDate time.Time) error {
 	tx, err := r.db.Begin(ctx)
@@ -673,11 +611,20 @@ func (r *OrderRepo) ConfirmDelivery(ctx context.Context, branchID, orderID, tota
 			return fmt.Errorf("update account balance: %w", err)
 		}
 
-		// --- Step 4: Record transaction ---
-		_, err = tx.Exec(ctx, `
-            INSERT INTO transactions (from_entity_id, from_entity_type, to_entity_id, to_entity_type, amount, transaction_type, notes, branch_id, memo_no)
-            VALUES ($1,'customers',$2,'accounts',$3,'payment','Payment for delivered order',$4,$5)
-        `, order.CustomerID, paymentAccountID, paidAmount, order.BranchID, order.MemoNo)
+		//insert transaction
+		transaction := &models.Transaction{
+			BranchID:        order.BranchID,
+			MemoNo:          order.MemoNo,
+			FromID:          order.CustomerID,
+			FromType:        "customers",
+			ToID:            *order.PaymentAccountID,
+			ToType:          "accounts",
+			Amount:          paidAmount,
+			TransactionType: "payment",
+			CreatedAt:       order.OrderDate,
+			Notes:           "Payment during product delivery",
+		}
+		_, err = CreateTransactionTx(ctx, tx, transaction) // silently add transaction
 		if err != nil {
 			return fmt.Errorf("insert transaction: %w", err)
 		}

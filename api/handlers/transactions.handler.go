@@ -39,36 +39,13 @@ func (t *TransactionHandler) GetTransactionSummaryHandler(w http.ResponseWriter,
 		return
 	}
 
-	var fromID, toID *int64
-	if val := r.URL.Query().Get("from_id"); val != "" {
-		id, err := strconv.ParseInt(val, 10, 64)
-		if err != nil {
-			utils.BadRequest(w, fmt.Errorf("invalid from_id"))
-			return
-		}
-		fromID = &id
-	}
-	if val := r.URL.Query().Get("to_id"); val != "" {
-		id, err := strconv.ParseInt(val, 10, 64)
-		if err != nil {
-			utils.BadRequest(w, fmt.Errorf("invalid to_id"))
-			return
-		}
-		toID = &id
-	}
-
-	var fromType, toType, trxType *string
-	if val := r.URL.Query().Get("from_type"); val != "" {
-		fromType = &val
-	}
-	if val := r.URL.Query().Get("to_type"); val != "" {
-		toType = &val
-	}
+	var  trxType *string
+	
 	if val := r.URL.Query().Get("transaction_type"); val != "" {
 		trxType = &val
 	}
 
-	transactions, err := t.DB.GetTransactionSummary(r.Context(), branchID, startDate, endDate, fromID, toID, fromType, toType, trxType)
+	transactions, err := t.DB.GetTransactionSummary(r.Context(), branchID, startDate, endDate, trxType)
 	if err != nil {
 		t.errorLog.Println("ERROR_01_GetTransactionSummaryHandler: ", err)
 		utils.BadRequest(w, err)
@@ -85,14 +62,7 @@ func (t *TransactionHandler) GetTransactionSummaryHandler(w http.ResponseWriter,
 func (t *TransactionHandler) ListTransactionsPaginatedHandler(w http.ResponseWriter, r *http.Request) {
 	pageNo, _ := strconv.Atoi(r.URL.Query().Get("pageNo"))
 	pageLength, _ := strconv.Atoi(r.URL.Query().Get("pageLength"))
-
-	if pageNo <= 0 {
-		pageNo = 1
-	}
-	if pageLength == 0 {
-		pageLength = 20
-	}
-
+	memo := r.URL.Query().Get("memo")
 	var fromID, toID *int64
 	if val := r.URL.Query().Get("from_id"); val != "" {
 		id, err := strconv.ParseInt(val, 10, 64)
@@ -128,7 +98,7 @@ func (t *TransactionHandler) ListTransactionsPaginatedHandler(w http.ResponseWri
 		utils.BadRequest(w, errors.New("Branch ID not found. Please include 'X-Branch-ID' header, e.g., X-Branch-ID: 1"))
 		return
 	}
-	transactions, err := t.DB.ListTransactionsPaginated(r.Context(), branchID, pageNo, pageLength, fromID, toID, fromType, toType, trxType)
+	transactions, err := t.DB.ListTransactionsPaginated(r.Context(), memo, branchID, pageNo, pageLength, fromID, toID, fromType, toType, trxType)
 	if err != nil {
 		t.errorLog.Println("ERROR_02_ListTransactionsPaginatedHandler: ", err)
 		utils.BadRequest(w, err)

@@ -7,6 +7,7 @@ import (
 
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/projuktisheba/erp-mini-api/internal/models"
+	"github.com/projuktisheba/erp-mini-api/internal/utils"
 )
 
 type ProductRepo struct {
@@ -60,16 +61,7 @@ func (s *ProductRepo) RestockProducts(ctx context.Context, date time.Time, memoN
 
 	// Generate next memo number if not provided
 	if memoNo == "" {
-		var next int
-		query := `
-			SELECT COALESCE(MAX(memo_no::INTEGER), 0) + 1 
-			FROM product_stock_registry 
-			WHERE memo_no ~ '^[0-9]+$';
-		`
-		if err := tx.QueryRow(ctx, query).Scan(&next); err != nil {
-			return "", fmt.Errorf("generate memo_no: %w", err)
-		}
-		memoNo = fmt.Sprintf("%05d", next)
+		memoNo = utils.GenerateMemoNo()
 	}
 
 	// Update stock and insert restock record
@@ -167,12 +159,7 @@ func (s *ProductRepo) SaleProducts(ctx context.Context, branchID int64, sale *mo
 
 	// Step 1: Generate next memo number
 	if sale.MemoNo == "" {
-		var next int
-		err := tx.QueryRow(ctx, `SELECT COALESCE(MAX(memo_no::INTEGER), 0) + 1 FROM sales_history WHERE memo_no ~ '^\d+$';`).Scan(&next)
-		if err != nil {
-			return "", fmt.Errorf("generate memo_no: %w", err)
-		}
-		sale.MemoNo = fmt.Sprintf("%05d", next)
+		sale.MemoNo = utils.GenerateMemoNo()
 	}
 
 	// Step 2: Insert into sales_history
@@ -180,9 +167,9 @@ func (s *ProductRepo) SaleProducts(ctx context.Context, branchID int64, sale *mo
 		INSERT INTO sales_history (
 			memo_no, sale_date, branch_id, customer_id, salesperson_id, 
 			payment_account_id, total_payable_amount, paid_amount, created_at, updated_at
-		) VALUES (LPAD(NEXTVAL('sales_memo_seq')::TEXT, 5, '0'), $1, $2, $3, $4, $5, $6, $7, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
 		 RETURNING memo_no
-	`, sale.SaleDate, branchID, sale.CustomerID, sale.SalespersonID,
+	`, sale.MemoNo, sale.SaleDate, branchID, sale.CustomerID, sale.SalespersonID,
 		sale.PaymentAccountID, sale.TotalPayableAmount, sale.PaidAmount).Scan(&sale.MemoNo)
 	if err != nil {
 		return "", fmt.Errorf("insert sales_history: %w", err)
@@ -192,15 +179,16 @@ func (s *ProductRepo) SaleProducts(ctx context.Context, branchID int64, sale *mo
 	for _, item := range sale.Items {
 		_, err = tx.Exec(ctx, `
 			INSERT INTO sold_items_history (
-				memo_no, product_id, quantity, total_prices, created_at, updated_at
-			) VALUES ($1, $2, $3, $4, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
-		`, sale.MemoNo, item.ID, item.Quantity, item.TotalPrices)
+				memo_no, branch_id, product_id, quantity, total_prices, created_at, updated_at
+			) VALUES ($1, $2, $3, $4, $5, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+		`, sale.MemoNo, branchID, item.ID, item.Quantity, item.TotalPrices)
 		if err != nil {
 			return "", fmt.Errorf("insert sold_items_history: %w", err)
 		}
 	}
 
 	// Step 4: Reduce stock for sold items
+	totalItems := int64(0)
 	for _, item := range sale.Items {
 		_, err = tx.Exec(ctx, `
 			UPDATE products
@@ -210,6 +198,7 @@ func (s *ProductRepo) SaleProducts(ctx context.Context, branchID int64, sale *mo
 		if err != nil {
 			return "", fmt.Errorf("update stock: %w", err)
 		}
+		totalItems += item.Quantity
 	}
 
 	// Step 5: Update account balance (for payment)
@@ -240,7 +229,7 @@ func (s *ProductRepo) SaleProducts(ctx context.Context, branchID int64, sale *mo
 	topSheet := &models.TopSheet{
 		Date:      sale.SaleDate,
 		BranchID:  branchID,
-		ReadyMade: 1,
+		ReadyMade: totalItems,
 	}
 
 	// safer: lookup account type (cash/bank)
@@ -261,14 +250,22 @@ func (s *ProductRepo) SaleProducts(ctx context.Context, branchID int64, sale *mo
 	}
 	// Step 8: Record financial transactions
 	if sale.PaidAmount > 0 {
-		query := `
-			INSERT INTO transactions 
-				(branch_id, from_entity_id, from_entity_type, to_entity_id, to_entity_type, amount, transaction_type, notes, created_at, updated_at)
-			VALUES ($1,$2,$3,$4,$5,$6,$7,$8,CURRENT_TIMESTAMP,CURRENT_TIMESTAMP)
-		`
 
-		_, err = tx.Exec(ctx, query, branchID, sale.CustomerID, "customers", sale.PaymentAccountID, acctType, sale.PaidAmount, "payment", sale.Notes)
-
+		//insert transaction
+		transaction := &models.Transaction{
+			BranchID:        branchID,
+			MemoNo:          sale.MemoNo,
+			FromID:          sale.CustomerID,
+			FromType:        "customers",
+			ToID:            sale.PaymentAccountID,
+			ToType:          "accounts",
+			Amount:          sale.PaidAmount,
+			TransactionType: "payment",
+			CreatedAt:       sale.SaleDate,
+			Notes:           "Sales Collection",
+		}
+		_, err = CreateTransactionTx(ctx, tx, transaction) // silently add transaction
+		
 		if err != nil {
 			return "", fmt.Errorf("failed to create transaction: %w", err)
 		}
@@ -441,6 +438,7 @@ func (s *ProductRepo) UpdateSoldProducts(ctx context.Context, branchID int64, sa
 		prevItems = append(prevItems, item)
 	}
 	rows.Close()
+	oldItemsCount := int64(0)
 	for _, item := range prevItems {
 		_, err = tx.Exec(ctx, `
 			UPDATE products
@@ -450,6 +448,7 @@ func (s *ProductRepo) UpdateSoldProducts(ctx context.Context, branchID int64, sa
 		if err != nil {
 			return fmt.Errorf("restore stock: %w", err)
 		}
+		oldItemsCount += item.Quantity
 	}
 
 	// Step 2: Delete old sold_items_history
@@ -490,7 +489,7 @@ func (s *ProductRepo) UpdateSoldProducts(ctx context.Context, branchID int64, sa
 	topSheet := &models.TopSheet{
 		Date:      sale.SaleDate,
 		BranchID:  branchID,
-		ReadyMade: -1,
+		ReadyMade: -oldItemsCount,
 	}
 	if acctType == "bank" {
 		topSheet.Bank = -prevSale.PaidAmount
@@ -527,6 +526,7 @@ func (s *ProductRepo) UpdateSoldProducts(ctx context.Context, branchID int64, sa
 	}
 
 	// Step 7: Insert new sold_items_history and deduct stock
+	newItemsCount := int64(0)
 	for _, item := range sale.Items {
 		_, err = tx.Exec(ctx, `
 			INSERT INTO sold_items_history (
@@ -544,6 +544,8 @@ func (s *ProductRepo) UpdateSoldProducts(ctx context.Context, branchID int64, sa
 		if err != nil {
 			return fmt.Errorf("deduct stock for new sale: %w", err)
 		}
+
+		newItemsCount += item.Quantity
 	}
 
 	// Step 8: Apply new financial adjustments
@@ -577,7 +579,7 @@ func (s *ProductRepo) UpdateSoldProducts(ctx context.Context, branchID int64, sa
 	topSheet = &models.TopSheet{
 		Date:      sale.SaleDate,
 		BranchID:  branchID,
-		ReadyMade: 1,
+		ReadyMade: newItemsCount,
 	}
 	if acctType == "bank" {
 		topSheet.Bank = sale.PaidAmount

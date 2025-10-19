@@ -45,10 +45,14 @@ func (o *OrderHandler) AddOrder(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	orderDetails.BranchID = branchID
+	o.infoLog.Println(orderDetails)
 	// Create the order
 	err = o.DB.CreateOrder(r.Context(), &orderDetails)
 	if err != nil {
 		o.errorLog.Println("ERROR_03_AddOrder: ", err)
+		if strings.Contains(err.Error(), "orders_memo_no_branch_id_key") {
+			err = errors.New("Duplicate memo is not allowed. Please enter unique memo number")
+		}
 		utils.BadRequest(w, err)
 		return
 	}

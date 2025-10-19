@@ -172,7 +172,7 @@ func (app *application) routes() http.Handler {
 
 	protected.Route("/api/v1/transactions", func(r chi.Router) {
 		r.Get("/summary", app.Handlers.Transaction.GetTransactionSummaryHandler)
-		r.Get("/list", app.Handlers.Transaction.ListTransactionsPaginatedHandler)
+		r.Get("/list", app.Handlers.Transaction.GetTransactionSummaryHandler)
 	})
 
 	// -------------------- Report Routes --------------------

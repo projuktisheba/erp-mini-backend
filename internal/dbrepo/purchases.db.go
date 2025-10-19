@@ -9,6 +9,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/projuktisheba/erp-mini-api/internal/models"
+	"github.com/projuktisheba/erp-mini-api/internal/utils"
 )
 
 type PurchaseRepo struct {
@@ -34,7 +35,9 @@ func (r *PurchaseRepo) CreatePurchase(ctx context.Context, p *models.Purchase) e
 			_ = tx.Rollback(ctx)
 		}
 	}()
-
+	if p.MemoNo == "" {
+		p.MemoNo = utils.GenerateMemoNo()
+	}
 	// Insert purchase
 	query := `
 		INSERT INTO purchase 
@@ -74,24 +77,40 @@ func (r *PurchaseRepo) CreatePurchase(ctx context.Context, p *models.Purchase) e
 	if err := SaveTopSheetTx(tx, ctx, topSheet); err != nil {
 		return fmt.Errorf("update topsheet expense: %w", err)
 	}
-	notes := fmt.Sprintf("Payment for Material Purchase || %s", p.Notes)
+	notes := "Payment for Material Purchase"
+	if strings.TrimSpace(p.Notes) != ""{
+		notes += p.Notes
+	}
 
-	_, err = tx.Exec(ctx, `
-		INSERT INTO transactions (
-			from_entity_id,
-			from_entity_type,
-			to_entity_id,
-			to_entity_type,
-			amount,
-			transaction_type,
-			notes,
-			branch_id
-		)
-		VALUES ($1, 'branches', $2, 'suppliers', $3, 'payment', $4, $5)
-	`, p.BranchID, p.SupplierID, p.TotalAmount, notes, p.BranchID)
+	// get the branch accounts id
+	var fromAccountID int64
+	err = tx.QueryRow(ctx, `
+        SELECT id
+        FROM accounts
+		WHERE branch_id = $1 AND type = 'bank'
+		LIMIT 1
+    `, p.BranchID).Scan(&fromAccountID)
 	if err != nil {
 		return err
 	}
+	//insert transaction
+	transaction := &models.Transaction{
+		BranchID:        p.BranchID,
+		MemoNo:          p.MemoNo,
+		FromID:          fromAccountID,
+		FromType:        "accounts",
+		ToID:            p.SupplierID,
+		ToType:          "suppliers",
+		Amount:          p.TotalAmount,
+		TransactionType: "payment",
+		CreatedAt:       p.PurchaseDate,
+		Notes:           notes,
+	}
+	_, err = CreateTransactionTx(ctx, tx, transaction) // silently add transaction
+	if err != nil {
+		return fmt.Errorf("insert transaction: %w", err)
+	}
+
 	// Commit transaction
 	if err := tx.Commit(ctx); err != nil {
 		return fmt.Errorf("commit transaction: %w", err)

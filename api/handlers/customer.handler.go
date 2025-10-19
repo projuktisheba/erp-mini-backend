@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/projuktisheba/erp-mini-api/internal/dbrepo"
 	"github.com/projuktisheba/erp-mini-api/internal/models"
 	"github.com/projuktisheba/erp-mini-api/internal/utils"
@@ -247,14 +248,13 @@ func (c *CustomerHandler) FilterCustomersByName(w http.ResponseWriter, r *http.R
 		return
 	}
 	customers, err := c.DB.FilterCustomersByName(r.Context(), branchID, name)
+	if errors.Is(err, pgx.ErrNoRows) {
+		utils.NotFound(w, "No customers found with given name")
+		return
+	}
 	if err != nil {
 		c.errorLog.Println("ERROR_01_FilterCustomersByName:", err)
 		utils.ServerError(w, err)
-		return
-	}
-
-	if len(customers) == 0 {
-		utils.NotFound(w, "No customers found with given name")
 		return
 	}
 
@@ -308,15 +308,10 @@ func (c *CustomerHandler) GetCustomers(w http.ResponseWriter, r *http.Request) {
 	}
 	// Call DB repo
 	customers, err := c.DB.GetCustomers(r.Context(), page, limit, branchID)
-	if err != nil {
+
+	if err != nil && !errors.Is(err, pgx.ErrNoRows) {
 		c.errorLog.Println("ERROR_01_GetCustomers:", err)
 		utils.ServerError(w, err)
-		return
-	}
-
-	// If no customers found
-	if len(customers) == 0 {
-		utils.NotFound(w, "No customers found")
 		return
 	}
 
@@ -345,14 +340,13 @@ func (c *CustomerHandler) GetCustomersNameAndID(w http.ResponseWriter, r *http.R
 		return
 	}
 	customers, err := c.DB.GetCustomersNameAndID(r.Context(), branchID)
+	if errors.Is(err, pgx.ErrNoRows) {
+		utils.NotFound(w, "No customers found")
+		return
+	}
 	if err != nil {
 		c.errorLog.Println("ERROR_01_GetCustomersNameAndID:", err)
 		utils.ServerError(w, err)
-		return
-	}
-
-	if len(customers) == 0 {
-		utils.NotFound(w, "No customers found")
 		return
 	}
 

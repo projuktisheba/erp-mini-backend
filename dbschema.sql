@@ -58,7 +58,7 @@ CREATE TABLE employees (
     name VARCHAR(100) NOT NULL,  
     role VARCHAR(20) NOT NULL CHECK (role IN ('chairman', 'manager', 'salesperson', 'worker')),
     status VARCHAR(20) NOT NULL DEFAULT 'active' CHECK(status IN('active', 'inactive')),  
-    mobile VARCHAR(20) NOT NULL UNIQUE,  
+    mobile VARCHAR(20) NOT NULL,  
     email VARCHAR(150)NOT NULL DEFAULT '',
     password TEXT NOT NULL DEFAULT '',
     passport_no VARCHAR(50)NOT NULL DEFAULT '',  
@@ -69,7 +69,8 @@ CREATE TABLE employees (
     avatar_link TEXT DEFAULT '',
     branch_id BIGINT NOT NULL REFERENCES branches(id) ON DELETE CASCADE,  
     created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,  
-    updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP  
+    updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE(mobile, branch_id) 
 );
 
 -- Indexes 
@@ -109,7 +110,7 @@ CREATE TABLE attendance (
     overtime_hours BIGINT DEFAULT 0,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    UNIQUE(employee_id, work_date)
+    UNIQUE(employee_id, work_date, branch_id)
 );
 
 CREATE INDEX idx_attendance_employee_date ON attendance(employee_id, work_date);
@@ -122,7 +123,7 @@ CREATE INDEX idx_attendance_status ON attendance(status);
 CREATE TABLE customers (
     id BIGSERIAL PRIMARY KEY,
     name VARCHAR(255) NOT NULL,
-    mobile VARCHAR(20) NOT NULL UNIQUE,
+    mobile VARCHAR(20) NOT NULL,
     address TEXT NOT NULL DEFAULT '',
     tax_id VARCHAR(100) DEFAULT '',
     due_amount NUMERIC(12,2) NOT NULL DEFAULT 0,
@@ -142,7 +143,8 @@ CREATE TABLE customers (
     
 
     created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+    updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE(mobile, branch_id)
 );
 
 -- Index for faster name lookups (useful for search/autocomplete)
@@ -279,7 +281,7 @@ WHERE status = 'cancelled';
 -- Order items for handling multiple products per order
 CREATE TABLE order_items (
     id BIGSERIAL PRIMARY KEY,
-    memo_no VARCHAR(100) NOT NULL REFERENCES orders(memo_no) ON DELETE CASCADE,
+    memo_no VARCHAR(100) NOT NULL DEFAULT '',
     product_id BIGINT NOT NULL REFERENCES products(id) ON DELETE RESTRICT,
     quantity INT NOT NULL CHECK (quantity > 0),
     subtotal NUMERIC(12,2) NOT NULL
@@ -290,9 +292,11 @@ CREATE TABLE transactions (
     branch_id BIGINT NOT NULL REFERENCES branches(id) ON DELETE CASCADE,
     from_entity_id BIGINT NOT NULL,
     from_entity_type VARCHAR(50),  -- optional, can be 'accounts', 'customers', 'employee's, etc.
-    
+    from_entity_name VARCHAR(100) NOT NULL DEFAULT '',
+
     to_entity_id BIGINT NOT NULL,
     to_entity_type VARCHAR(50),    -- optional, can be 'accounts', 'customers', 'employee's, etc.
+    to_entity_name VARCHAR(100) NOT NULL DEFAULT '',
     
     amount NUMERIC(12,2) NOT NULL,
     transaction_type VARCHAR(20) NOT NULL 
@@ -384,7 +388,7 @@ CREATE INDEX idx_product_stock_registry_stock_date_branch_id ON product_stock_re
 
 CREATE TABLE sales_history (
     id BIGSERIAL PRIMARY KEY,
-    memo_no VARCHAR(100) NOT NULL UNIQUE,
+    memo_no VARCHAR(100) NOT NULL,
     sale_date DATE NOT NULL DEFAULT CURRENT_DATE,
     branch_id BIGINT NOT NULL REFERENCES branches(id) ON DELETE CASCADE,    
     customer_id BIGINT NOT NULL REFERENCES customers(id) ON DELETE CASCADE,
@@ -393,7 +397,8 @@ CREATE TABLE sales_history (
     total_payable_amount NUMERIC(12,2) NOT NULL  DEFAULT 0.00,
     paid_amount NUMERIC(12,2) NOT NULL  DEFAULT 0.00,
     created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+    updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE(memo_no, branch_id)
 );
 
 -- index creation
@@ -404,15 +409,17 @@ CREATE INDEX idx_sales_history_stock_date_branch_id ON sales_history (sale_date,
 
 CREATE TABLE sold_items_history (
     id BIGSERIAL PRIMARY KEY,
-    memo_no VARCHAR(100) NOT NULL DEFAULT '',
+    branch_id BIGINT NOT NULL REFERENCES branches(id) ON DELETE CASCADE,
+    memo_no VARCHAR(100) NOT NULL,
     product_id BIGINT NOT NULL REFERENCES products(id) ON DELETE CASCADE,
     quantity BIGINT NOT NULL DEFAULT 0,
     total_prices NUMERIC(12,2) NOT NULL  DEFAULT 0.00,
     created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
-CREATE INDEX idx_sold_items_history_memo_no ON sold_items_history (memo_no);
 CREATE INDEX idx_sold_items_history_product_id ON sold_items_history (product_id);
+CREATE INDEX idx_sold_items_history_branch_id ON sold_items_history (branch_id);
+CREATE INDEX idx_sold_items_history_memo_no ON sold_items_history (memo_no);
 
 
 CREATE TABLE employees_progress (
@@ -438,5 +445,47 @@ CREATE TABLE employees_progress (
 CREATE INDEX idx_employees_progress_branch_id ON employees_progress(branch_id);
 
 
-CREATE SEQUENCE order_memo_seq START 9000;
-CREATE SEQUENCE sales_memo_seq START 9000;
+
+
+-- Select all rows from 'suppliers where branch_id = 1'
+SELECT
+			t.transaction_id,
+			t.memo_no,
+			t.branch_id,
+			t.from_entity_id,
+			t.from_entity_type,
+			COALESCE(
+				CASE 
+					WHEN t.from_entity_type = 'accounts' THEN a1.name
+					WHEN t.from_entity_type = 'customers' THEN c1.name
+					WHEN t.from_entity_type = 'employees' THEN e1.name
+					WHEN t.from_entity_type = 'suppliers' THEN s1.name
+					ELSE NULL
+				END, '-') AS from_entity_name,
+			t.to_entity_id,
+			t.to_entity_type,
+			COALESCE(
+				CASE 
+					WHEN t.to_entity_type = 'accounts' THEN a2.name
+					WHEN t.to_entity_type = 'customers' THEN c2.name
+					WHEN t.to_entity_type = 'employees' THEN e2.name
+					WHEN t.to_entity_type = 'suppliers' THEN s2.name
+					ELSE NULL
+				END, '-') AS to_entity_name,
+			t.amount,
+			t.transaction_type,
+			t.notes,
+			t.created_at
+		FROM transactions t
+		LEFT JOIN accounts a1 ON t.from_entity_type = 'accounts' AND t.from_entity_id = a1.id
+		LEFT JOIN customers c1 ON t.from_entity_type = 'customers' AND t.from_entity_id = c1.id
+		LEFT JOIN employees e1 ON t.from_entity_type = 'employees' AND t.from_entity_id = e1.id
+		LEFT JOIN suppliers s1 ON t.from_entity_type = 'suppliers' AND t.from_entity_id = s1.id
+
+		LEFT JOIN accounts a2 ON t.to_entity_type = 'accounts' AND t.to_entity_id = a2.id
+		LEFT JOIN customers c2 ON t.to_entity_type = 'customers' AND t.to_entity_id = c2.id
+		LEFT JOIN employees e2 ON t.to_entity_type = 'employees' AND t.to_entity_id = e2.id
+		LEFT JOIN suppliers s2 ON t.to_entity_type = 'suppliers' AND t.to_entity_id = s2.id
+
+		-- WHERE t.created_at::date BETWEEN $1 AND $2
+		ORDER BY t.created_at DESC;

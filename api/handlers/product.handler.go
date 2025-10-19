@@ -168,7 +168,11 @@ func (h *ProductHandler) SaleProducts(w http.ResponseWriter, r *http.Request) {
 
 	memoNo, err := h.DB.SaleProducts(r.Context(), branchID, &requestBody)
 	if err != nil {
+
 		h.errorLog.Println("ERROR_03_SaleProducts: Unable to process sale =>", err)
+		if strings.Contains(err.Error(), `duplicate key value violates unique constraint "sales_history_memo_no_branch_id_key"`) {
+			err = errors.New("Duplicate memo number is not allowed")
+		}
 		utils.BadRequest(w, err)
 		return
 	}
@@ -193,7 +197,7 @@ func (h *ProductHandler) UpdateSoldProducts(w http.ResponseWriter, r *http.Reque
 		return
 	}
 	memoNo := strings.TrimSpace(r.URL.Query().Get("memo_no"))
-	if memoNo == ""{
+	if memoNo == "" {
 		h.errorLog.Println("ERROR_02_UpdateSoldProducts: Memo not found in the payload")
 		utils.BadRequest(w, errors.New("Memo not found in the payload"))
 		return
@@ -207,7 +211,7 @@ func (h *ProductHandler) UpdateSoldProducts(w http.ResponseWriter, r *http.Reque
 	}
 	requestBody.MemoNo = memoNo
 	h.infoLog.Println(requestBody)
-	for _, v := range requestBody.Items{
+	for _, v := range requestBody.Items {
 		fmt.Println(v.ID)
 	}
 

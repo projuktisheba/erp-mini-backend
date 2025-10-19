@@ -127,9 +127,9 @@ func (s *CustomerRepo) DeductCustomerDueAmount(ctx context.Context, customerID, 
 	}
 
 	err = SaveTopSheetTx(tx, ctx, &models.TopSheet{
-		Date: time.Now().UTC(),
+		Date:     time.Now(),
 		BranchID: branchID,
-		Cash: deductedAmount,
+		Cash:     deductedAmount,
 	})
 	if err != nil {
 		return err
@@ -201,7 +201,7 @@ func (s *CustomerRepo) FilterCustomersByName(ctx context.Context, branchID int64
 		       sleeve_length, sleeve_width, round_width,
 		       created_at, updated_at
 		FROM customers
-		WHERE branch_id = $1 AND name ILIKE $1
+		WHERE branch_id = $1 AND name ILIKE $2
 		ORDER BY name ASC;`
 
 	rows, err := s.db.Query(ctx, query, branchID, "%"+name+"%")
@@ -228,6 +228,10 @@ func (s *CustomerRepo) FilterCustomersByName(ctx context.Context, branchID int64
 		return nil, fmt.Errorf("error iterating customer rows: %w", err)
 	}
 
+	// Return explicit no rows when empty for callers that want to distinguish
+	if len(customers) == 0 {
+		return nil, pgx.ErrNoRows
+	}
 	return customers, nil
 }
 
@@ -278,6 +282,9 @@ func (s *CustomerRepo) GetCustomers(ctx context.Context, page, limit int, branch
 			return nil, fmt.Errorf("error scanning customer: %w", err)
 		}
 		customers = append(customers, &c)
+	}
+	if len(customers) == 0 {
+		return nil, pgx.ErrNoRows
 	}
 	return customers, nil
 }

@@ -250,8 +250,8 @@ type AccountNameID struct {
 }
 
 type Transaction struct {
-	ID              int64     `json:"id"`
 	TransactionID   string    `json:"transaction_id"` // optional unique identifier if needed
+	MemoNo          string    `json:"memo_no"`        
 	BranchID        int64     `json:"branch_id"`
 	FromID          int64     `json:"from_id"`
 	FromAccountName string    `json:"from_account_name"`

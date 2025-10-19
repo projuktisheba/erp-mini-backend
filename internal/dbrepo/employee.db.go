@@ -196,8 +196,10 @@ func (user *EmployeeRepo) SubmitSalary(ctx context.Context, salaryDate time.Time
 	defer tx.Rollback(ctx)
 
 	// update employee_progress
-	SubmitEmployeeSalaryTx(tx, ctx, salaryDate, branchID, employeeID, amount)
-
+	err = SubmitEmployeeSalaryTx(tx, ctx, salaryDate, branchID, employeeID, amount)
+	if err != nil {
+		return fmt.Errorf("insert salary: %w", err)
+	}
 	//increment expense
 	// Update top_sheet inside the same tx
 	topSheet := &models.TopSheet{
@@ -209,29 +211,37 @@ func (user *EmployeeRepo) SubmitSalary(ctx context.Context, salaryDate time.Time
 	if err != nil {
 		return fmt.Errorf("save topsheet: %w", err)
 	}
-
+	// get the branch accounts id
+	var fromAccountID int64
+	err = tx.QueryRow(ctx, `
+        SELECT id
+        FROM accounts
+		WHERE branch_id = $1 AND type = 'bank'
+		LIMIT 1
+    `, branchID).Scan(&fromAccountID)
+	if err != nil {
+		return err
+	}
 	//insert transaction
 	transaction := &models.Transaction{
 		BranchID:        branchID,
-		FromID:          branchID,
-		FromAccountName: "Branch",
-		FromType:        "branch",
+		FromID:          fromAccountID,
+		FromType:        "accounts",
 		ToID:            employeeID,
-		ToAccountName:   "",
 		ToType:          "employees",
 		Amount:          amount,
 		TransactionType: "salary",
 		CreatedAt:       salaryDate,
-		Notes:           "Paying employee salary",
+		Notes:           "Employee Salary",
 	}
-	CreateTransactionTx(ctx, tx, transaction) // silently add transaction
+	_, err = CreateTransactionTx(ctx, tx, transaction) // silently add transaction
 
 	// Commit if all succeeded
-	if err := tx.Commit(ctx); err != nil {
-		return fmt.Errorf("commit tx: %w", err)
+	if err != nil {
+		return err
 	}
 
-	return nil
+	return tx.Commit(ctx)
 }
 
 // UpdateEmployeeStatus updates employee role and status
@@ -420,6 +430,7 @@ func (e *EmployeeRepo) UpdateWorkerProgress(ctx context.Context, workerProgress 
 		//insert transaction
 		transaction := &models.Transaction{
 			BranchID:        workerProgress.BranchID,
+			MemoNo:          "",
 			FromID:          workerProgress.BranchID,
 			FromAccountName: "Branch",
 			FromType:        "branch",
