@@ -873,7 +873,7 @@ func (r *OrderRepo) ListOrders(ctx context.Context, branchID int64) ([]*models.O
 		argID++
 	}
 
-	query += ` ORDER BY o.order_date DESC`
+	query += ` ORDER BY o.memo_no DESC`
 
 	rows, err := r.db.Query(ctx, query, args...)
 	if err != nil {

@@ -350,7 +350,6 @@ type SalaryRecord struct {
 	EmployeeName string    `json:"employee_name"`
 	Role         string    `json:"role"`
 	BaseSalary   float64   `json:"base_salary"`
-	OvertimeRate float64   `json:"overtime_rate"`
 	TotalSalary  float64   `json:"total_salary"`
 	SheetDate    time.Time `json:"sheet_date"`
 }

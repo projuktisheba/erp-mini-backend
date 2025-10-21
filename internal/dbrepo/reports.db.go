@@ -304,12 +304,11 @@ func (r *ReportRepo) GetSalaryList(ctx context.Context, branchID, employeeID int
 			e.name,
 			e.role,
 			e.base_salary,
-			ep.overtime_hours,
 			ep.salary,
 			ep.sheet_date
 		FROM employees_progress ep
 		LEFT JOIN employees e ON e.id = ep.employee_id
-		WHERE ep.branch_id = $1
+		WHERE ep.branch_id = $1 and ep.salary > 0
 	`
 	args := []any{branchID}
 	argPos := 2 // next placeholder index
@@ -342,7 +341,6 @@ func (r *ReportRepo) GetSalaryList(ctx context.Context, branchID, employeeID int
 			&s.EmployeeName,
 			&s.Role,
 			&s.BaseSalary,
-			&s.OvertimeRate,
 			&s.TotalSalary,
 			&s.SheetDate,
 		); err != nil {
