@@ -146,6 +146,7 @@ func (app *application) routes() http.Handler {
 	// -------------------- Inventory Routes --------------------
 	protected.Route("/api/v1/purchase", func(r chi.Router) {
 		r.Post("/", app.Handlers.Purchase.AddPurchase)
+		r.Patch("/", app.Handlers.Purchase.UpdatePurchase)
 		r.Get("/list", app.Handlers.Purchase.ListPurchases)
 	})
 

@@ -69,6 +69,49 @@ func (h *PurchaseHandler) AddPurchase(w http.ResponseWriter, r *http.Request) {
 	utils.WriteJSON(w, http.StatusCreated, resp)
 }
 
+// =========================
+// UpdatePurchase
+// =========================
+func (h *PurchaseHandler) UpdatePurchase(w http.ResponseWriter, r *http.Request) {
+	var purchase models.Purchase
+	err := utils.ReadJSON(w, r, &purchase)
+	if err != nil {
+		h.errorLog.Println("ERROR_01_UpdatePurchase:", err)
+		utils.BadRequest(w, err)
+		return
+	}
+	//read branch id
+	branchID := utils.GetBranchID(r)
+	if branchID == 0 {
+		h.errorLog.Println("ERROR_02_UpdatePurchase: Branch id not found")
+		utils.BadRequest(w, errors.New("Branch ID not found. Please include 'X-Branch-ID' header, e.g., X-Branch-ID: 1"))
+		return
+	}
+	purchase.BranchID = branchID
+
+	h.infoLog.Println(purchase)
+	// Update the purchase
+	err = h.DB.UpdatePurchase(r.Context(), &purchase)
+	if err != nil {
+		h.errorLog.Println("ERROR_03_UpdatePurchase:", err)
+		utils.BadRequest(w, err)
+		return
+	}
+
+	var resp struct {
+		Error    bool             `json:"error"`
+		Status   string           `json:"status"`
+		Message  string           `json:"message"`
+		Purchase *models.Purchase `json:"purchase"`
+	}
+	resp.Error = false
+	resp.Status = "success"
+	resp.Message = "Purchase updated successfully"
+	resp.Purchase = &purchase
+
+	utils.WriteJSON(w, http.StatusCreated, resp)
+}
+
 // ListPurchases handles GET /purchases
 func (h *PurchaseHandler) ListPurchases(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
