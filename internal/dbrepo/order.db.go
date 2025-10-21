@@ -420,13 +420,14 @@ func (r *OrderRepo) CancelOrder(ctx context.Context, orderID int64, branchID int
 
 	// First, get current status
 	var currentStatus string
-	err = tx.QueryRow(ctx, `SELECT status FROM orders WHERE id = $1`, orderID).Scan(&currentStatus)
+	var totalItems, ItemsDelivered int64
+	err = tx.QueryRow(ctx, `SELECT status, total_items, items_delivered FROM orders WHERE id = $1`, orderID).Scan(&currentStatus, &totalItems, &ItemsDelivered)
 	if err != nil {
 		return fmt.Errorf("fetch current status: %w", err)
 	}
 
 	// Prevent invalid updates
-	if currentStatus == "cancelled" || currentStatus == "delivery" {
+	if currentStatus == "cancelled" || (currentStatus == "delivery" &&  totalItems == ItemsDelivered){
 		return fmt.Errorf("cannot cancel order with current status '%s'", currentStatus)
 	}
 
@@ -437,7 +438,7 @@ func (r *OrderRepo) CancelOrder(ctx context.Context, orderID int64, branchID int
 		SET status = 'cancelled',
 			updated_at = CURRENT_TIMESTAMP
 		WHERE id = $1
-		RETURNING id, branch_id, memo_no, customer_id, salesperson_id, advance_payment_amount, total_payable_amount, payment_account_id, items_delivered
+		RETURNING id, branch_id, memo_no, customer_id, salesperson_id, advance_payment_amount, total_payable_amount, payment_account_id, total_items, items_delivered
 	`, orderID).Scan(
 		&order.ID,
 		&order.BranchID,
@@ -447,20 +448,15 @@ func (r *OrderRepo) CancelOrder(ctx context.Context, orderID int64, branchID int
 		&order.AdvancePaymentAmount,
 		&order.TotalPayableAmount,
 		&order.PaymentAccountID,
+		&order.TotalItems,
 		&order.ItemsDelivered,
 	)
 	if err != nil {
 		return fmt.Errorf("update order to cancelled: %w", err)
 	}
-	//count total items
-	totalItems := int64(0)
-	err = tx.QueryRow(ctx, `SELECT SUM(COALESCE(quantity, 0)) FROM order_items WHERE memo_no=$1`, order.MemoNo).Scan(&totalItems)
-	if err != nil {
-		return fmt.Errorf("unable to count total items: %w", err)
-	}
 	totalItems -= order.ItemsDelivered
 	// Revert account balance + refund transaction
-	if order.AdvancePaymentAmount > 0 && order.PaymentAccountID != nil {
+	if order.AdvancePaymentAmount > 0 && ItemsDelivered == 0 && order.PaymentAccountID != nil {
 		_, err := tx.Exec(ctx, `
 			UPDATE accounts
 			SET current_balance = current_balance - $1
