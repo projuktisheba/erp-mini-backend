@@ -259,7 +259,8 @@ func (r *ReportRepo) GetBranchReport(ctx context.Context, branchID int64, startD
             bank,
             order_count,
             delivery,
-            checkout
+            checkout,
+			cancelled
         FROM top_sheet
         WHERE branch_id = $1
           AND sheet_date >= $2
@@ -285,6 +286,7 @@ func (r *ReportRepo) GetBranchReport(ctx context.Context, branchID int64, startD
 			&ts.OrderCount,
 			&ts.Delivery,
 			&ts.Checkout,
+			&ts.Cancelled,
 		)
 		if err != nil {
 			return nil, err

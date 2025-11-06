@@ -132,7 +132,7 @@ func (r *OrderRepo) CreateOrder(ctx context.Context, newOrder *models.Order) err
 		BranchID:   newOrder.BranchID,
 		EmployeeID: newOrder.SalespersonID,
 		OrderCount: totalItems,
-		// SaleAmount: newOrder.TotalPayableAmount, // DEBUG uncomment if client wants to add
+		SaleAmount: newOrder.TotalPayableAmount, // DEBUG comment if client don't want to add
 	}
 	err = UpdateSalespersonProgressReportTx(tx, ctx, &salespersonProgress)
 	if err != nil {
@@ -345,7 +345,7 @@ func (r *OrderRepo) UpdateOrder(ctx context.Context, newOrder *models.Order) err
 		BranchID:   newOrder.BranchID,
 		EmployeeID: newOrder.SalespersonID,
 		OrderCount: itemDiff,
-		// SaleAmount: newOrder.TotalPayableAmount, // DEBUG uncomment if client wants to add
+		SaleAmount: newOrder.TotalPayableAmount-oldOrder.TotalPayableAmount, // DEBUG comment if client don't want to add
 	}
 	err = UpdateSalespersonProgressReportTx(tx, ctx, &salespersonProgress)
 	if err != nil {
@@ -484,6 +484,7 @@ func (r *OrderRepo) CancelOrder(ctx context.Context, orderID int64, branchID int
 			return fmt.Errorf("insert refund transaction: %w", err)
 		}
 	}
+	
 	// TopSheet -> Decrease cash/bank
 	topSheet := &models.TopSheet{
 		Date:      time.Now(),
@@ -514,12 +515,18 @@ func (r *OrderRepo) CancelOrder(ctx context.Context, orderID int64, branchID int
 		return fmt.Errorf("save topsheet: %w", err)
 	}
 	// Step : Update salesperson daily progress record
+
+	// DEBUG comments if client don't want to add
+	deductedAmount := order.TotalPayableAmount
+	if ItemsDelivered > 0{
+		deductedAmount -= order.AdvancePaymentAmount
+	}
 	salespersonProgress := models.SalespersonProgress{
 		Date:       time.Now().UTC(),
 		BranchID:   branchID,
 		EmployeeID: order.SalespersonID,
 		OrderCount: -totalItems,
-		// SaleAmount: order.TotalPayableAmount, // DEBUG uncomment if client wants to add
+		SaleReturnAmount: deductedAmount, // DEBUG comment if client don't want to add
 	}
 	err = UpdateSalespersonProgressReportTx(tx, ctx, &salespersonProgress)
 	if err != nil {
@@ -575,14 +582,11 @@ func (r *OrderRepo) ConfirmDelivery(ctx context.Context, branchID, orderID, tota
 	if order.Status != "checkout" && order.Status != "delivery" {
 		return fmt.Errorf("order status is not 'checkout'")
 	}
-	fmt.Println(order, totalItems)
+
 	if order.TotalItems-order.ItemsDelivered < totalItems {
 		totalItems = order.TotalItems - order.ItemsDelivered
 	}
 
-	fmt.Println(order, totalItems)
-	fmt.Println("Total Items: ", order.TotalItems, "  Items Delivered: ", order.ItemsDelivered)
-	fmt.Println("Current: ", totalItems)
 	// --- Step 2: Update order status, exit date, delivered items ---
 	_, err = tx.Exec(ctx, `
         UPDATE orders
