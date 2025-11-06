@@ -345,7 +345,7 @@ func (r *OrderRepo) UpdateOrder(ctx context.Context, newOrder *models.Order) err
 		BranchID:   newOrder.BranchID,
 		EmployeeID: newOrder.SalespersonID,
 		OrderCount: itemDiff,
-		SaleAmount: newOrder.TotalPayableAmount-oldOrder.TotalPayableAmount, // DEBUG comment if client don't want to add
+		SaleAmount: newOrder.TotalPayableAmount - oldOrder.TotalPayableAmount, // DEBUG comment if client don't want to add
 	}
 	err = UpdateSalespersonProgressReportTx(tx, ctx, &salespersonProgress)
 	if err != nil {
@@ -400,7 +400,6 @@ func (r *OrderRepo) CheckoutOrder(ctx context.Context, orderID int64, branchID i
 	topSheet := &models.TopSheet{
 		Date:     time.Now(),
 		BranchID: branchID,
-		Pending:  -totalItems,
 		Checkout: totalItems,
 	}
 	if err := SaveTopSheetTx(tx, ctx, topSheet); err != nil {
@@ -427,7 +426,7 @@ func (r *OrderRepo) CancelOrder(ctx context.Context, orderID int64, branchID int
 	}
 
 	// Prevent invalid updates
-	if currentStatus == "cancelled" || (currentStatus == "delivery" &&  totalItems == ItemsDelivered){
+	if currentStatus == "cancelled" || (currentStatus == "delivery" && totalItems == ItemsDelivered) {
 		return fmt.Errorf("cannot cancel order with current status '%s'", currentStatus)
 	}
 
@@ -484,19 +483,14 @@ func (r *OrderRepo) CancelOrder(ctx context.Context, orderID int64, branchID int
 			return fmt.Errorf("insert refund transaction: %w", err)
 		}
 	}
-	
+
 	// TopSheet -> Decrease cash/bank
 	topSheet := &models.TopSheet{
 		Date:      time.Now(),
 		BranchID:  branchID,
 		Cancelled: totalItems,
 	}
-	if currentStatus == "pending" {
-		topSheet.Pending = -totalItems
-	} else if currentStatus == "checkout" {
-		topSheet.Checkout = -totalItems
-		// TODO : restock existing items to the product_stock_registry
-	}
+
 	// safer: lookup account type (cash/bank)
 	var acctType string
 	err = tx.QueryRow(ctx, `SELECT type FROM accounts WHERE id=$1`, *order.PaymentAccountID).Scan(&acctType)
@@ -518,14 +512,14 @@ func (r *OrderRepo) CancelOrder(ctx context.Context, orderID int64, branchID int
 
 	// DEBUG comments if client don't want to add
 	deductedAmount := order.TotalPayableAmount
-	if ItemsDelivered > 0{
+	if ItemsDelivered > 0 {
 		deductedAmount -= order.AdvancePaymentAmount
 	}
 	salespersonProgress := models.SalespersonProgress{
-		Date:       time.Now().UTC(),
-		BranchID:   branchID,
-		EmployeeID: order.SalespersonID,
-		OrderCount: -totalItems,
+		Date:             time.Now().UTC(),
+		BranchID:         branchID,
+		EmployeeID:       order.SalespersonID,
+		OrderCount:       -totalItems,
 		SaleReturnAmount: deductedAmount, // DEBUG comment if client don't want to add
 	}
 	err = UpdateSalespersonProgressReportTx(tx, ctx, &salespersonProgress)
@@ -632,10 +626,9 @@ func (r *OrderRepo) ConfirmDelivery(ctx context.Context, branchID, orderID, tota
 
 	// --- Step 5: Update top sheet ---
 	topSheet := &models.TopSheet{
-		Date:     exitDate,
-		BranchID: branchID,
-		Checkout: -totalItems,
-		Delivery: totalItems,
+		Date:        exitDate,
+		BranchID:    branchID,
+		Delivery:    totalItems,
 		TotalAmount: paidAmount,
 	}
 	var acctType string
