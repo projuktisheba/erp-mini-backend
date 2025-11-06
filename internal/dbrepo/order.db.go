@@ -636,6 +636,7 @@ func (r *OrderRepo) ConfirmDelivery(ctx context.Context, branchID, orderID, tota
 		BranchID: branchID,
 		Checkout: -totalItems,
 		Delivery: totalItems,
+		TotalAmount: paidAmount,
 	}
 	var acctType string
 	err = tx.QueryRow(ctx, `SELECT type FROM accounts WHERE id=$1`, paymentAccountID).Scan(&acctType)
