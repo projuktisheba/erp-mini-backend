@@ -36,7 +36,7 @@ func (r *OrderRepo) CreateOrder(ctx context.Context, newOrder *models.Order) err
 	// --- Step 1: Insert order ---
 	err = tx.QueryRow(ctx, `
         INSERT INTO orders (memo_no, branch_id, order_date, salesperson_id, customer_id, total_payable_amount, advance_payment_amount, payment_account_id, status, delivery_date, exit_date, notes, total_items)
-        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12, $13)
+        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)
         RETURNING id, memo_no
     `,
 		newOrder.MemoNo, newOrder.BranchID, newOrder.OrderDate, newOrder.SalespersonID, newOrder.CustomerID,
@@ -316,7 +316,7 @@ func (r *OrderRepo) UpdateOrder(ctx context.Context, newOrder *models.Order) err
 		"accounts",                    // $4
 		newOrder.AdvancePaymentAmount, // $5
 		"Advance payment adjustment for order cancellation", // $6
-		newOrder.MemoNo, // $7
+		oldOrder.MemoNo, // $7
 	)
 	if err != nil {
 		return fmt.Errorf("update transaction: %w", err)
@@ -400,6 +400,7 @@ func (r *OrderRepo) CheckoutOrder(ctx context.Context, orderID int64, branchID i
 	topSheet := &models.TopSheet{
 		Date:     time.Now(),
 		BranchID: branchID,
+		Pending:  -totalItems,
 		Checkout: totalItems,
 	}
 	if err := SaveTopSheetTx(tx, ctx, topSheet); err != nil {
@@ -490,7 +491,12 @@ func (r *OrderRepo) CancelOrder(ctx context.Context, orderID int64, branchID int
 		BranchID:  branchID,
 		Cancelled: totalItems,
 	}
-
+	if currentStatus == "pending" {
+		topSheet.Pending = -totalItems
+	} else if currentStatus == "checkout" {
+		topSheet.Checkout = -totalItems
+		// TODO : restock existing items to the product_stock_registry
+	}
 	// safer: lookup account type (cash/bank)
 	var acctType string
 	err = tx.QueryRow(ctx, `SELECT type FROM accounts WHERE id=$1`, *order.PaymentAccountID).Scan(&acctType)
@@ -583,13 +589,26 @@ func (r *OrderRepo) ConfirmDelivery(ctx context.Context, branchID, orderID, tota
 
 	// --- Step 2: Update order status, exit date, delivered items ---
 	_, err = tx.Exec(ctx, `
-        UPDATE orders
-        SET status='delivery',
+		UPDATE orders
+		SET 
+			status = 'delivery',
 			advance_payment_amount = COALESCE(advance_payment_amount, 0) + $1,
 			items_delivered = COALESCE(items_delivered, 0) + $2,
-			exit_date=$3
-        WHERE id=$4
-    `, paidAmount, totalItems, exitDate, orderID)
+			exit_date = $3,
+			delivery_info = 
+				CASE 
+					WHEN delivery_info = '' OR delivery_info IS NULL 
+					THEN $4
+					ELSE delivery_info || ':::' || $4
+				END
+		WHERE id = $5
+	`,
+		paidAmount,
+		totalItems,
+		exitDate,
+		fmt.Sprintf("%s@%d@%.2f", exitDate.Format("2006-01-02"), totalItems, paidAmount),
+		orderID,
+	)
 	if err != nil {
 		return fmt.Errorf("update order: %w", err)
 	}
@@ -628,6 +647,7 @@ func (r *OrderRepo) ConfirmDelivery(ctx context.Context, branchID, orderID, tota
 	topSheet := &models.TopSheet{
 		Date:        exitDate,
 		BranchID:    branchID,
+		Checkout:    -totalItems,
 		Delivery:    totalItems,
 		TotalAmount: paidAmount,
 	}
@@ -670,7 +690,7 @@ func (r *OrderRepo) GetOrderDetailsByID(ctx context.Context, orderID int64) (*mo
         SELECT 
             o.id, o.memo_no, o.order_date, o.salesperson_id, o.customer_id,
             o.total_payable_amount, o.advance_payment_amount,
-            o.payment_account_id, o.status, o.delivery_date, o.exit_date, o.notes,
+            o.payment_account_id, o.status, o.delivery_date, o.exit_date, o.delivery_info, o.notes,
             o.created_at, o.updated_at,
             c.name AS customer_name,
             e.name AS employee_name
@@ -690,6 +710,7 @@ func (r *OrderRepo) GetOrderDetailsByID(ctx context.Context, orderID int64) (*mo
 		&order.Status,
 		&order.DeliveryDate,
 		&order.ExitDate,
+		&order.DeliveryInfo,
 		&order.Notes,
 		&order.CreatedAt,
 		&order.UpdatedAt,
@@ -768,7 +789,7 @@ func (r *OrderRepo) ListOrdersWithItems(ctx context.Context, customerID, Salespe
 		SELECT 
 		    o.id, o.memo_no, o.branch_id, o.order_date, o.salesperson_id, o.customer_id,
 		    o.total_payable_amount, o.advance_payment_amount, o.payment_account_id,
-		    o.status, o.delivery_date, o.exit_date, o.notes, o.created_at, o.updated_at,
+		    o.status, o.delivery_date, o.exit_date, o.delivery_info, o.notes, o.created_at, o.updated_at,
 			c.name, c.mobile, e.name, e.mobile
 		FROM orders o
 		LEFT JOIN customers c ON o.customer_id = c.id
@@ -809,7 +830,7 @@ func (r *OrderRepo) ListOrdersWithItems(ctx context.Context, customerID, Salespe
 		err := rows.Scan(
 			&o.ID, &o.MemoNo, &o.BranchID, &o.OrderDate, &o.SalespersonID, &o.CustomerID,
 			&o.TotalPayableAmount, &o.AdvancePaymentAmount, &o.PaymentAccountID,
-			&o.Status, &o.DeliveryDate, &o.ExitDate, &o.Notes, &o.CreatedAt, &o.UpdatedAt,
+			&o.Status, &o.DeliveryDate, &o.ExitDate, &o.DeliveryInfo, &o.Notes, &o.CreatedAt, &o.UpdatedAt,
 			&o.CustomerName, &o.CustomerMobile, &o.SalespersonName, &o.SalespersonMobile,
 		)
 		if err != nil {
@@ -850,7 +871,7 @@ func (r *OrderRepo) ListOrders(ctx context.Context, branchID int64) ([]*models.O
 		SELECT 
 		    o.id, o.memo_no, o.branch_id, o.order_date, o.salesperson_id, o.customer_id,
 		    o.total_payable_amount, o.advance_payment_amount, o.payment_account_id,
-		    o.status, o.delivery_date, o.exit_date, o.items_delivered, o.total_items, o.notes, o.created_at, o.updated_at,
+		    o.status, o.delivery_date, o.exit_date, o.delivery_info, o.items_delivered, o.total_items, o.notes, o.created_at, o.updated_at,
 			c.name, c.mobile, e.name, e.mobile
 		FROM orders o
 		LEFT JOIN customers c ON o.customer_id = c.id
@@ -881,7 +902,7 @@ func (r *OrderRepo) ListOrders(ctx context.Context, branchID int64) ([]*models.O
 		err := rows.Scan(
 			&o.ID, &o.MemoNo, &o.BranchID, &o.OrderDate, &o.SalespersonID, &o.CustomerID,
 			&o.TotalPayableAmount, &o.AdvancePaymentAmount, &o.PaymentAccountID,
-			&o.Status, &o.DeliveryDate, &o.ExitDate, &o.ItemsDelivered, &o.TotalItems, &o.Notes, &o.CreatedAt, &o.UpdatedAt,
+			&o.Status, &o.DeliveryDate, &o.ExitDate, &o.DeliveryInfo, &o.ItemsDelivered, &o.TotalItems, &o.Notes, &o.CreatedAt, &o.UpdatedAt,
 			&o.CustomerName, &o.CustomerMobile, &o.SalespersonName, &o.SalespersonMobile,
 		)
 		if err != nil {
@@ -898,7 +919,7 @@ func (r *OrderRepo) ListOrdersPaginated(ctx context.Context, pageNo, pageLength 
 		SELECT 
 		    o.id, o.memo_no, o.branch_id, o.order_date, o.salesperson_id, o.customer_id, 
 		    o.total_payable_amount, o.advance_payment_amount, o.payment_account_id,
-		    o.status, o.delivery_date, o.exit_date, o.notes, o.created_at, o.updated_at,
+		    o.status, o.delivery_date, o.exit_date, o.delivery_info, o.notes, o.created_at, o.updated_at,
 			c.name AS customer_name,
 		    c.mobile AS customer_mobile,
 		    e.name AS employee_name
@@ -947,7 +968,7 @@ func (r *OrderRepo) ListOrdersPaginated(ctx context.Context, pageNo, pageLength 
 		err := rows.Scan(
 			&o.ID, &o.MemoNo, &o.BranchID, &o.OrderDate, &o.SalespersonID, &o.CustomerID,
 			&o.TotalPayableAmount, &o.AdvancePaymentAmount, &o.PaymentAccountID,
-			&o.Status, &o.DeliveryDate, &o.ExitDate, &o.Notes, &o.CreatedAt, &o.UpdatedAt,
+			&o.Status, &o.DeliveryDate, &o.ExitDate, &o.DeliveryInfo, &o.Notes, &o.CreatedAt, &o.UpdatedAt,
 			&o.CustomerName, &o.CustomerMobile, &o.SalespersonName,
 		)
 		if err != nil {
@@ -965,7 +986,7 @@ func (r *OrderRepo) ListOrdersByStatus(ctx context.Context, status string, branc
 		SELECT 
 		    o.id, o.memo_no, o.branch_id, o.order_date, o.salesperson_id, o.customer_id, 
 		    o.total_payable_amount, o.advance_payment_amount, o.payment_account_id,
-		    o.status, o.delivery_date, o.exit_date, o.notes, o.created_at, o.updated_at,
+		    o.status, o.delivery_date, o.exit_date, o.delivery_info, o.notes, o.created_at, o.updated_at,
 			c.name AS customer_name,
 		    c.mobile AS customer_mobile,
 		    e.name AS employee_name
@@ -987,7 +1008,7 @@ func (r *OrderRepo) ListOrdersByStatus(ctx context.Context, status string, branc
 		if err := rows.Scan(
 			&o.ID, &o.MemoNo, &o.BranchID, &o.OrderDate, &o.SalespersonID, &o.CustomerID,
 			&o.TotalPayableAmount, &o.AdvancePaymentAmount, &o.PaymentAccountID,
-			&o.Status, &o.DeliveryDate, &o.ExitDate, &o.Notes, &o.CreatedAt, &o.UpdatedAt,
+			&o.Status, &o.DeliveryDate, &o.ExitDate, &o.DeliveryInfo, &o.Notes, &o.CreatedAt, &o.UpdatedAt,
 			&o.CustomerName, &o.CustomerMobile, &o.SalespersonName,
 		); err != nil {
 			return nil, err

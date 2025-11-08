@@ -220,6 +220,7 @@ CREATE TABLE orders (
     total_items BIGINT NOT NULL DEFAULT 0,
     items_delivered BIGINT NOT NULL DEFAULT 0,
     exit_date DATE,
+    delivery_info TEXT DEFAULT '';
     
     notes TEXT DEFAULT '',
     
@@ -227,6 +228,7 @@ CREATE TABLE orders (
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     UNIQUE(memo_no, branch_id)
 );
+
 -- =========================
 -- Optimized Indexes for orders table
 -- =========================

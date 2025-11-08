@@ -224,6 +224,7 @@ type Order struct {
 	CreatedAt            time.Time    `json:"created_at"`
 	UpdatedAt            time.Time    `json:"updated_at"`
 	Items                []*OrderItem `json:"items,omitempty"`
+	DeliveryInfo         string       `json:"delivery_info"`
 }
 
 type OrderItem struct {
@@ -251,7 +252,7 @@ type AccountNameID struct {
 
 type Transaction struct {
 	TransactionID   string    `json:"transaction_id"` // optional unique identifier if needed
-	MemoNo          string    `json:"memo_no"`        
+	MemoNo          string    `json:"memo_no"`
 	BranchID        int64     `json:"branch_id"`
 	FromID          int64     `json:"from_id"`
 	FromAccountName string    `json:"from_account_name"`
