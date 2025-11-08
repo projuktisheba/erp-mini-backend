@@ -34,14 +34,16 @@ func (r *OrderRepo) CreateOrder(ctx context.Context, newOrder *models.Order) err
 		totalItems += it.Quantity
 	}
 	// --- Step 1: Insert order ---
+	newOrder.DeliveryInfo = fmt.Sprintf("%s@advance payment@%.2f", newOrder.OrderDate.Format("2006-01-02"), newOrder.AdvancePaymentAmount)
+
 	err = tx.QueryRow(ctx, `
-        INSERT INTO orders (memo_no, branch_id, order_date, salesperson_id, customer_id, total_payable_amount, advance_payment_amount, payment_account_id, status, delivery_date, exit_date, notes, total_items)
-        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)
+        INSERT INTO orders (memo_no, branch_id, order_date, salesperson_id, customer_id, total_payable_amount, advance_payment_amount, payment_account_id, status, delivery_date, exit_date, delivery_info, notes, total_items)
+        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)
         RETURNING id, memo_no
     `,
 		newOrder.MemoNo, newOrder.BranchID, newOrder.OrderDate, newOrder.SalespersonID, newOrder.CustomerID,
 		newOrder.TotalPayableAmount, newOrder.AdvancePaymentAmount, newOrder.PaymentAccountID,
-		newOrder.Status, newOrder.DeliveryDate, newOrder.ExitDate, newOrder.Notes, totalItems,
+		newOrder.Status, newOrder.DeliveryDate, newOrder.ExitDate, newOrder.DeliveryInfo, newOrder.Notes, totalItems,
 	).Scan(&newOrder.ID, &newOrder.MemoNo)
 	if err != nil {
 		return fmt.Errorf("insert order: %w", err)
