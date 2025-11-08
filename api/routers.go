@@ -153,7 +153,7 @@ func (app *application) routes() http.Handler {
 	// -------------------- Order Routes --------------------
 	protected.Route("/api/v1/orders", func(r chi.Router) {
 		r.Post("/", app.Handlers.Order.AddOrder)
-		r.Put("/", app.Handlers.Order.UpdateOrder)
+		r.Patch("/", app.Handlers.Order.UpdateOrder)
 		r.Delete("/", app.Handlers.Order.CancelOrder)
 		r.Patch("/checkout", app.Handlers.Order.CheckoutOrder)
 		r.Patch("/delivery", app.Handlers.Order.OrderDelivery)

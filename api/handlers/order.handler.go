@@ -73,6 +73,7 @@ func (o *OrderHandler) AddOrder(w http.ResponseWriter, r *http.Request) {
 
 // UpdateOrder
 func (o *OrderHandler) UpdateOrder(w http.ResponseWriter, r *http.Request) {
+
 	var orderDetails models.Order
 	err := utils.ReadJSON(w, r, &orderDetails)
 	if err != nil {
@@ -81,10 +82,17 @@ func (o *OrderHandler) UpdateOrder(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	err = o.DB.UpdateOrder(r.Context(), &orderDetails)
+	//read branch id
+	branchID := utils.GetBranchID(r)
+	if branchID == 0 {
+		o.errorLog.Println("ERROR_02_UpdateOrder: Branch id not found")
+		utils.BadRequest(w, errors.New("Branch ID not found. Please include 'X-Branch-ID' header, e.g., X-Branch-ID: 1"))
+		return
+	}
+	orderDetails.BranchID = branchID
+	err = o.DB.UpdateOrder(r.Context(), &orderDetails, o.errorLog)
 	if err != nil {
-
-		o.errorLog.Println("ERROR_02_UpdateOrder: ", err)
+		o.errorLog.Println("ERROR_03_UpdateOrder: ", err)
 		utils.BadRequest(w, err)
 		return
 	}

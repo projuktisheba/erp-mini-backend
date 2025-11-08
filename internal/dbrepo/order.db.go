@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log"
 	"strconv"
 	"strings"
 	"time"
@@ -145,9 +146,10 @@ func (r *OrderRepo) CreateOrder(ctx context.Context, newOrder *models.Order) err
 }
 
 // UpdateOrder updates an existing order and its items, adjusting account and customer due
-func (r *OrderRepo) UpdateOrder(ctx context.Context, newOrder *models.Order) error {
+func (r *OrderRepo) UpdateOrder(ctx context.Context, newOrder *models.Order, errorLog *log.Logger) error {
 	tx, err := r.db.Begin(ctx)
 	if err != nil {
+		errorLog.Println(err)
 		return fmt.Errorf("begin tx: %w", err)
 	}
 	defer tx.Rollback(ctx)
@@ -175,9 +177,14 @@ func (r *OrderRepo) UpdateOrder(ctx context.Context, newOrder *models.Order) err
 		&oldOrder.Notes,
 	)
 	if err != nil {
+		errorLog.Println(err)
 		return fmt.Errorf("load old order: %w", err)
 	}
 
+	if oldOrder.Status != "pending" {
+		errorLog.Println(err)
+		return errors.New("Order update failed: only Pending orders can be edited.")
+	}
 	// --- Step 2: Load old order items ---
 	rows, err := tx.Query(ctx, `
         SELECT id, product_id, quantity, subtotal
@@ -185,6 +192,7 @@ func (r *OrderRepo) UpdateOrder(ctx context.Context, newOrder *models.Order) err
         WHERE memo_no=$1
     `, oldOrder.MemoNo)
 	if err != nil {
+		errorLog.Println(err)
 		return fmt.Errorf("load old items: %w", err)
 	}
 	defer rows.Close()
@@ -194,38 +202,39 @@ func (r *OrderRepo) UpdateOrder(ctx context.Context, newOrder *models.Order) err
 	for rows.Next() {
 		var it models.OrderItem
 		if err := rows.Scan(&it.ID, &it.ProductID, &it.Quantity, &it.TotalPrice); err != nil {
+			errorLog.Println(err)
 			return fmt.Errorf("scan old item: %w", err)
 		}
 		oldItems[it.ProductID] = it
 		oldItemsCount += it.Quantity
 	}
+
 	newItemsCount := int64(0)
 	newItems := map[int64]*models.OrderItem{}
 	for _, it := range newOrder.Items {
 		newItems[it.ProductID] = it
 		newItemsCount += it.Quantity
 	}
-	//item differences
+
+	// --- Step 3: Update orders table ---
 	itemDiff := newItemsCount - oldItemsCount
-	// --- Step 5: Update orders table ---
+	newOrder.DeliveryInfo = fmt.Sprintf("%s@advance payment@%.2f", newOrder.OrderDate.Format("2006-01-02"), newOrder.AdvancePaymentAmount)
 	_, err = tx.Exec(ctx, `
         UPDATE orders
         SET order_date=$2, salesperson_id=$3, customer_id=$4,
-            total_payable_amount=$5, advance_payment_amount=$6, payment_account_id=$7,
-            status=$8, delivery_date=$9, exit_date=$10, notes=$11, total_items=total_items+$12, updated_at=CURRENT_TIMESTAMP
-        WHERE id=$13
-    `, newOrder.OrderDate, newOrder.SalespersonID, newOrder.CustomerID,
-		newOrder.TotalPayableAmount, newOrder.AdvancePaymentAmount, newOrder.PaymentAccountID,
-		newOrder.Status, newOrder.DeliveryDate, newOrder.ExitDate, newOrder.Notes, itemDiff, newOrder.ID)
+            total_payable_amount=$5, advance_payment_amount=$6, payment_account_id=$7, delivery_date=$8, exit_date=$9, delivery_info=$10, notes=$11, total_items=total_items+$12, updated_at=CURRENT_TIMESTAMP
+        WHERE id=$1
+    `, newOrder.ID, newOrder.OrderDate, newOrder.SalespersonID, newOrder.CustomerID,
+		newOrder.TotalPayableAmount, newOrder.AdvancePaymentAmount, newOrder.PaymentAccountID, newOrder.DeliveryDate, newOrder.ExitDate, newOrder.DeliveryInfo, newOrder.Notes, itemDiff)
 	if err != nil {
+		errorLog.Println(err)
 		return fmt.Errorf("update order: %w", err)
 	}
 
-	// --- Step 6: Reconcile order_items ---
-
-	// Insert or update items
+	// --- Step 4: Reconcile order_items ---
 	for pid, it := range newItems {
 		if old, ok := oldItems[pid]; ok {
+			// Update existing item
 			if old.Quantity != it.Quantity || old.TotalPrice != it.TotalPrice {
 				_, err := tx.Exec(ctx, `
                     UPDATE order_items
@@ -237,10 +246,11 @@ func (r *OrderRepo) UpdateOrder(ctx context.Context, newOrder *models.Order) err
 				}
 			}
 		} else {
+			// Insert new item
 			_, err := tx.Exec(ctx, `
                 INSERT INTO order_items (memo_no, product_id, quantity, subtotal)
                 VALUES ($1,$2,$3,$4)
-            `, newOrder.MemoNo, it.ProductID, it.Quantity, it.TotalPrice) // FIX: use MemoNo
+            `, oldOrder.MemoNo, it.ProductID, it.Quantity, it.TotalPrice)
 			if err != nil {
 				return fmt.Errorf("insert order_item: %w", err)
 			}
@@ -257,14 +267,12 @@ func (r *OrderRepo) UpdateOrder(ctx context.Context, newOrder *models.Order) err
 		}
 	}
 
-	// --- Step 3: Adjust account balance if advance changed ---
+	// --- Step 5: Adjust account balance if advance changed ---
 	advanceDiff := newOrder.AdvancePaymentAmount - oldOrder.AdvancePaymentAmount
 	if advanceDiff != 0 {
 		if newOrder.PaymentAccountID == nil {
 			return errors.New("payment_account_id required when advance changes")
 		}
-
-		// Update account balance
 		_, err := tx.Exec(ctx, `
             UPDATE accounts
             SET current_balance = current_balance + $1
@@ -275,7 +283,26 @@ func (r *OrderRepo) UpdateOrder(ctx context.Context, newOrder *models.Order) err
 		}
 	}
 
-	// Update top_sheet
+	// --- Step 6: Update TopSheet using diffs ---
+	// Lookup old account type (if there was a previous advance)
+	var oldAcctType string
+	if oldOrder.PaymentAccountID != nil {
+		err = tx.QueryRow(ctx, `SELECT type FROM accounts WHERE id=$1`, *oldOrder.PaymentAccountID).Scan(&oldAcctType)
+		if err != nil {
+			return fmt.Errorf("lookup old account type: %w", err)
+		}
+	}
+
+	// Lookup new account type
+	var newAcctType string
+	if newOrder.PaymentAccountID != nil {
+		err = tx.QueryRow(ctx, `SELECT type FROM accounts WHERE id=$1`, *newOrder.PaymentAccountID).Scan(&newAcctType)
+		if err != nil {
+			return fmt.Errorf("lookup new account type: %w", err)
+		}
+	}
+
+	// Reconcile topSheet amounts
 	topSheet := &models.TopSheet{
 		Date:       newOrder.OrderDate,
 		BranchID:   newOrder.BranchID,
@@ -283,48 +310,84 @@ func (r *OrderRepo) UpdateOrder(ctx context.Context, newOrder *models.Order) err
 		Pending:    itemDiff,
 	}
 
-	// safer: lookup account type (cash/bank)
-	var acctType string
-	err = tx.QueryRow(ctx, `SELECT type FROM accounts WHERE id=$1`, *newOrder.PaymentAccountID).Scan(&acctType)
-	if err != nil {
-		return fmt.Errorf("lookup account type: %w", err)
+	// Subtract old advance from old account type
+	if oldOrder.AdvancePaymentAmount > 0 && oldOrder.PaymentAccountID != nil {
+		if oldAcctType == "bank" {
+			topSheet.Bank -= oldOrder.AdvancePaymentAmount
+		} else {
+			topSheet.Cash -= oldOrder.AdvancePaymentAmount
+		}
 	}
-	if acctType == "bank" {
-		topSheet.Bank = advanceDiff
-	} else {
-		topSheet.Cash = advanceDiff
+
+	// Add new advance to new account type
+	if newOrder.AdvancePaymentAmount > 0 && newOrder.PaymentAccountID != nil {
+		if newAcctType == "bank" {
+			topSheet.Bank += newOrder.AdvancePaymentAmount
+		} else {
+			topSheet.Cash += newOrder.AdvancePaymentAmount
+		}
 	}
 
 	err = SaveTopSheetTx(tx, ctx, topSheet)
 	if err != nil {
-		return fmt.Errorf("save topsheet: %w", err)
+		return fmt.Errorf("save top-sheet: %w", err)
 	}
 
-	_, err = tx.Exec(ctx, `
-		UPDATE transactions
-		SET 
-			from_entity_id = $1,
-			from_entity_type = $2,
-			to_entity_id = $3,
-			to_entity_type = $4,
-			amount = $5,
-			notes = $6,
-			updated_at = CURRENT_TIMESTAMP
-		WHERE memo_no = $7
-		`,
-		newOrder.CustomerID,           // $1
-		"customers",                   // $2
-		*newOrder.PaymentAccountID,    // $3
-		"accounts",                    // $4
-		newOrder.AdvancePaymentAmount, // $5
-		"Advance payment adjustment for order cancellation", // $6
-		oldOrder.MemoNo, // $7
-	)
+	// --- Step 7: Inset or Update transaction record ---
+	var exists bool
+	err = tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM transactions WHERE memo_no=$1)`, oldOrder.MemoNo).Scan(&exists)
 	if err != nil {
-		return fmt.Errorf("update transaction: %w", err)
+		return fmt.Errorf("check transaction exists: %w", err)
 	}
 
-	// --- Step 4: Adjust customer due ---
+	if exists {
+		// Update existing transaction
+		_, err = tx.Exec(ctx, `
+			WITH first_tx AS (
+				SELECT transaction_id
+				FROM transactions
+				WHERE memo_no = $1
+				ORDER BY transaction_id
+				LIMIT 1
+			)
+			UPDATE transactions
+			SET 
+				memo_no = $2,
+				from_entity_id = $3,
+				from_entity_type = $4,
+				to_entity_id = $5,
+				to_entity_type = $6,
+				amount = $7,
+				notes = $8,
+				updated_at = CURRENT_TIMESTAMP
+			FROM first_tx
+			WHERE transactions.transaction_id = first_tx.transaction_id;
+
+    `, oldOrder.MemoNo, oldOrder.MemoNo, newOrder.CustomerID, "customers", *newOrder.PaymentAccountID, "accounts", newOrder.AdvancePaymentAmount, "Advance payment adjustment")
+	} else {
+		//insert transaction
+		transaction := &models.Transaction{
+			BranchID:        newOrder.BranchID,
+			MemoNo:          newOrder.MemoNo,
+			FromID:          newOrder.CustomerID,
+			FromType:        "customers",
+			ToID:            *newOrder.PaymentAccountID,
+			ToType:          "accounts",
+			Amount:          newOrder.AdvancePaymentAmount,
+			TransactionType: "payment",
+			CreatedAt:       newOrder.OrderDate,
+			Notes:           "Advance payment for order",
+		}
+		_, err = CreateTransactionTx(ctx, tx, transaction) // silently add transaction
+		if err != nil {
+			return fmt.Errorf("insert transaction: %w", err)
+		}
+	}
+	if err != nil {
+		return fmt.Errorf("upsert transaction: %w", err)
+	}
+
+	// --- Step 8: Adjust customer due ---
 	oldDue := oldOrder.TotalPayableAmount - oldOrder.AdvancePaymentAmount
 	newDue := newOrder.TotalPayableAmount - newOrder.AdvancePaymentAmount
 	dueDiff := newDue - oldDue
@@ -341,20 +404,20 @@ func (r *OrderRepo) UpdateOrder(ctx context.Context, newOrder *models.Order) err
 			return errors.New("invalid customer_id")
 		}
 	}
-	// Step 6: Update salesperson daily progress record
+
+	// --- Step 9: Update salesperson daily progress ---
 	salespersonProgress := models.SalespersonProgress{
 		Date:       newOrder.OrderDate,
 		BranchID:   newOrder.BranchID,
 		EmployeeID: newOrder.SalespersonID,
 		OrderCount: itemDiff,
-		SaleAmount: newOrder.TotalPayableAmount - oldOrder.TotalPayableAmount, // DEBUG comment if client don't want to add
+		SaleAmount: newOrder.TotalPayableAmount - oldOrder.TotalPayableAmount,
 	}
-	err = UpdateSalespersonProgressReportTx(tx, ctx, &salespersonProgress)
-	if err != nil {
+	if err := UpdateSalespersonProgressReportTx(tx, ctx, &salespersonProgress); err != nil {
 		return fmt.Errorf("failed to update employee progress: %w", err)
 	}
 
-	// --- Step 7: Commit transaction ---
+	// --- Step 10: Commit transaction ---
 	if err := tx.Commit(ctx); err != nil {
 		return fmt.Errorf("commit tx: %w", err)
 	}
