@@ -160,18 +160,18 @@ func (h *PurchaseHandler) ListPurchases(w http.ResponseWriter, r *http.Request) 
 	// Optional date filters
 	// -------------------------
 	var fromDate, toDate *time.Time
-	if f := r.URL.Query().Get("from_date"); f != "" {
+	if f := r.URL.Query().Get("start_date"); f != "" {
 		t, err := time.Parse("2006-01-02", f)
 		if err != nil {
-			utils.BadRequest(w, errors.New("invalid from_date format, expected YYYY-MM-DD"))
+			utils.BadRequest(w, errors.New("invalid start_date format, expected YYYY-MM-DD"))
 			return
 		}
 		fromDate = &t
 	}
-	if t := r.URL.Query().Get("to_date"); t != "" {
+	if t := r.URL.Query().Get("end_date"); t != "" {
 		tt, err := time.Parse("2006-01-02", t)
 		if err != nil {
-			utils.BadRequest(w, errors.New("invalid to_date format, expected YYYY-MM-DD"))
+			utils.BadRequest(w, errors.New("invalid end_date format, expected YYYY-MM-DD"))
 			return
 		}
 		toDate = &tt
