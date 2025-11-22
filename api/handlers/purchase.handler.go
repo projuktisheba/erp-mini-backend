@@ -2,6 +2,7 @@ package api
 
 import (
 	"errors"
+	"fmt"
 	"log"
 	"net/http"
 	"strconv"
@@ -89,7 +90,16 @@ func (h *PurchaseHandler) UpdatePurchase(w http.ResponseWriter, r *http.Request)
 	}
 	purchase.BranchID = branchID
 
-	h.infoLog.Println(purchase)
+	// Print each field
+	fmt.Println("ID:", purchase.ID)
+	fmt.Println("MemoNo:", purchase.MemoNo)
+	fmt.Println("PurchaseDate:", purchase.PurchaseDate)
+	fmt.Println("SupplierID:", purchase.SupplierID)
+	fmt.Println("SupplierName:", purchase.SupplierName)
+	fmt.Println("BranchID:", purchase.BranchID)
+	fmt.Println("TotalAmount:", purchase.TotalAmount)
+	fmt.Println("Notes:", purchase.Notes)
+	fmt.Println("CreatedAt:", purchase.CreatedAt)
 	// Update the purchase
 	err = h.DB.UpdatePurchase(r.Context(), &purchase)
 	if err != nil {

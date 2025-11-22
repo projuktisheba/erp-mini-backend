@@ -227,7 +227,7 @@ func (r *PurchaseRepo) ListPurchasesPaginated(
 	return purchases, total, nil
 }
 
-// UpdatePurchase updates an existing purchase, adjusts branch cash, top_sheet, and transaction records.
+// UpdatePurchase updates an existing purchase, adjusts branch cash, and updates TopSheet & transaction
 func (r *PurchaseRepo) UpdatePurchase(ctx context.Context, p *models.Purchase) error {
 	// Begin transaction
 	tx, err := r.db.BeginTx(ctx, pgx.TxOptions{})
@@ -242,49 +242,45 @@ func (r *PurchaseRepo) UpdatePurchase(ctx context.Context, p *models.Purchase) e
 		}
 	}()
 
-	// Fetch old total amount for balance and expense adjustment
+	// Get existing purchase for comparison
 	var oldTotal float64
-	var oldMemoNo string
-	err = tx.QueryRow(ctx, `
-		SELECT total_amount, memo_no
-		FROM purchase
-		WHERE id = $1
-	`, p.ID).Scan(&oldTotal, &oldMemoNo)
+	err = tx.QueryRow(ctx, "SELECT total_amount FROM purchase WHERE id=$1", p.ID).Scan(&oldTotal)
 	if err != nil {
-		return fmt.Errorf("fetch old purchase: %w", err)
+		return fmt.Errorf("fetch existing purchase: %w", err)
 	}
 
 	// Update purchase record
-	_, err = tx.Exec(ctx, `
+	query := `
 		UPDATE purchase
-		SET 
-			memo_no = $1,
-			purchase_date = $2,
-			supplier_id = $3,
-			branch_id = $4,
-			total_amount = $5,
-			notes = $6,
-			updated_at = CURRENT_TIMESTAMP
-		WHERE id = $7
-	`, p.MemoNo, p.PurchaseDate, p.SupplierID, p.BranchID, p.TotalAmount, p.Notes, p.ID)
+		SET memo_no=$1, purchase_date=$2, supplier_id=$3, branch_id=$4, total_amount=$5, notes=$6, updated_at=CURRENT_TIMESTAMP
+		WHERE id=$7
+		RETURNING updated_at
+	`
+	err = tx.QueryRow(ctx, query,
+		p.MemoNo,
+		p.PurchaseDate,
+		p.SupplierID,
+		p.BranchID,
+		p.TotalAmount,
+		p.Notes,
+		p.ID,
+	).Scan(&p.UpdatedAt)
 	if err != nil {
 		return fmt.Errorf("update purchase: %w", err)
 	}
 
-	// --- Adjust branch cash account based on difference ---
+	// Adjust branch cash account (refund or deduct the difference)
 	diff := p.TotalAmount - oldTotal
-	if diff != 0 {
-		_, err = tx.Exec(ctx, `
-			UPDATE accounts
-			SET current_balance = current_balance - $1
-			WHERE branch_id = $2 AND type = 'cash'
-		`, diff, p.BranchID)
-		if err != nil {
-			return fmt.Errorf("update account balance: %w", err)
-		}
+	_, err = tx.Exec(ctx, `
+		UPDATE accounts
+		SET current_balance = current_balance - $1
+		WHERE branch_id = $2 AND type='cash'
+	`, diff, p.BranchID)
+	if err != nil {
+		return fmt.Errorf("update account balance: %w", err)
 	}
 
-	// --- Update TopSheet (adjust expense difference) ---
+	// Update TopSheet expense
 	topSheet := &models.TopSheet{
 		Date:     p.PurchaseDate,
 		BranchID: p.BranchID,
@@ -294,22 +290,25 @@ func (r *PurchaseRepo) UpdatePurchase(ctx context.Context, p *models.Purchase) e
 		return fmt.Errorf("update topsheet expense: %w", err)
 	}
 
-	notes := "Payment adjustment for Material Purchase"
+	// Prepare notes
+	notes := "Deducted payment for Material Purchase. "
 	if strings.TrimSpace(p.Notes) != "" {
-		notes += " - " + p.Notes
+		notes += p.Notes
 	}
 
-	//  transaction for adjustment
+	// Get the branch cash account id
 	var fromAccountID int64
 	err = tx.QueryRow(ctx, `
-			SELECT id FROM accounts
-			WHERE branch_id = $1 AND type = 'cash'
-			LIMIT 1
-		`, p.BranchID).Scan(&fromAccountID)
+		SELECT id
+		FROM accounts
+		WHERE branch_id = $1 AND type = 'cash'
+		LIMIT 1
+	`, p.BranchID).Scan(&fromAccountID)
 	if err != nil {
-		return fmt.Errorf("fetch account: %w", err)
+		return err
 	}
 
+	// Update transaction record
 	transaction := &models.Transaction{
 		BranchID:        p.BranchID,
 		MemoNo:          p.MemoNo,
@@ -318,13 +317,15 @@ func (r *PurchaseRepo) UpdatePurchase(ctx context.Context, p *models.Purchase) e
 		ToID:            p.SupplierID,
 		ToType:          "suppliers",
 		Amount:          p.TotalAmount,
-		TransactionType: "adjustment",
+		TransactionType: "payment",
 		CreatedAt:       p.PurchaseDate,
 		Notes:           notes,
 	}
+
+	// For simplicity, create new one
 	_, err = CreateTransactionTx(ctx, tx, transaction)
 	if err != nil {
-		return fmt.Errorf("create transaction: %w", err)
+		return fmt.Errorf("update transaction: %w", err)
 	}
 
 	// Commit
