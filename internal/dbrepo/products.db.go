@@ -265,7 +265,7 @@ func (s *ProductRepo) SaleProducts(ctx context.Context, branchID int64, sale *mo
 			Notes:           "Sales Collection",
 		}
 		_, err = CreateTransactionTx(ctx, tx, transaction) // silently add transaction
-		
+
 		if err != nil {
 			return "", fmt.Errorf("failed to create transaction: %w", err)
 		}
@@ -530,9 +530,9 @@ func (s *ProductRepo) UpdateSoldProducts(ctx context.Context, branchID int64, sa
 	for _, item := range sale.Items {
 		_, err = tx.Exec(ctx, `
 			INSERT INTO sold_items_history (
-				memo_no, product_id, quantity, total_prices, created_at, updated_at
+				memo_no, branch_id, product_id, quantity, total_prices, created_at, updated_at
 			) VALUES ($1, $2, $3, $4, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
-		`, sale.MemoNo, item.ID, item.Quantity, item.TotalPrices)
+		`, sale.MemoNo, branchID, item.ID, item.Quantity, item.TotalPrices)
 		if err != nil {
 			return fmt.Errorf("insert new sold_items_history: %w", err)
 		}

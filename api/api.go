@@ -86,14 +86,16 @@ func RunServer(ctx context.Context) error {
 		Expiry:    time.Hour * 24,
 	}
 
-	infoLog.Println(cfg)
 	// Connection to database
 	var dbConn *pgxpool.Pool
+	var connectedDB string
 	if cfg.Env == "live" {
 		dbConn, err = driver.NewPgxPool(cfg.DB.DSN)
+		connectedDB = cfg.DB.DSN
 	} else {
 		//connect to dev database
 		dbConn, err = driver.NewPgxPool(cfg.DB.DEVDSN)
+		connectedDB = cfg.DB.DEVDSN
 	}
 
 	if err != nil {
@@ -103,7 +105,7 @@ func RunServer(ctx context.Context) error {
 	defer dbConn.Close()
 
 	dbRepo := dbrepo.NewDBRepository(dbConn)
-	infoLog.Println("Connected to database")
+	infoLog.Println("Connected to database ", connectedDB)
 
 	//Initiate handlers
 	app = &application{

@@ -89,6 +89,7 @@ func (app *application) routes() http.Handler {
 
 		// Update employee progress record
 		r.Post("/worker/progress", app.Handlers.Employee.RecordWorkerDailyProgress)
+		r.Patch("/worker/progress", app.Handlers.Employee.UpdateWorkerDailyProgress)
 	})
 
 	// -------------------- Attendance Routes --------------------
